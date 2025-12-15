@@ -1,0 +1,75 @@
+Aavegotchi Paint Debug Log
+Generated: Sun Dec 14 23:24:59 2025
+=============================================================
+
+[DEBUG] Loading wearables database from: /Users/juliuswong/Library/Application Support/Aseprite/extensions/aavegotchi-paint/aavegotchi_db_wearables.json
+[DEBUG] JsonLoader: Extracted 300 wearables from JSON
+[DEBUG] JsonLoader: First wearable - ID: 1, Name: Camo Hat
+[DEBUG] JsonLoader: First wearable has 16 slot positions
+[DEBUG] Successfully loaded 300 wearables from database
+[DEBUG] First wearable: ID=1, Name=Camo Hat
+[DEBUG] First wearable slotPositions length: 16
+[DEBUG] buildWearableOptions: Processing slot 0, total wearables in DB: 300
+[DEBUG] Wearable 2 - Camo Pants matches slot but file not found
+[DEBUG] Wearable 5 - Snow Camo Pants matches slot but file not found
+[DEBUG] Wearable 8 - Marine Jacket matches slot but file not found
+[DEBUG] Found wearable: 303 - Kimono at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/303_Kimono/Front/303_Kimono_Front.aseprite
+[DEBUG] Found wearable: 373 - Overalls at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/373_Overalls/Front/373_Overalls_Front.aseprite
+[DEBUG] Slot 0 results: 72 checked, 72 matched slot, 2 exist, 2 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 1, total wearables in DB: 300
+[DEBUG] Wearable 13 - Sergey Beard matches slot but file not found
+[DEBUG] Wearable 18 - Aave Hero Mask matches slot but file not found
+[DEBUG] Wearable 55 - Aagent Headset matches slot but file not found
+[DEBUG] Found wearable: 240 - Headphones at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/240_Headphones/240_Headphones_front.aseprite
+[DEBUG] Found wearable: 356 - Bandage at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/356_Bandage/356_Bandage_front.aseprite
+[DEBUG] Found wearable: 384 - Faangs at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/384_Faangs/384_Faangs_front.aseprite
+[DEBUG] Slot 1 results: 26 checked, 26 matched slot, 5 exist, 5 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 2, total wearables in DB: 300
+[DEBUG] Wearable 14 - Sergey Eyes matches slot but file not found
+[DEBUG] Wearable 36 - ETH Logo Glasses matches slot but file not found
+[DEBUG] Wearable 49 - Coderdan Shades matches slot but file not found
+[DEBUG] Found wearable: 86 - Monocle at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/86_Monocle/86_Monocle_front.aseprite
+[DEBUG] Found wearable: 208 - Aviators at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/208_Aviators/208_Aviators_front.aseprite
+[DEBUG] Slot 2 results: 31 checked, 31 matched slot, 2 exist, 2 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 3, total wearables in DB: 300
+[DEBUG] Wearable 1 - Camo Hat matches slot but file not found
+[DEBUG] Wearable 4 - Snow Camo Hat matches slot but file not found
+[DEBUG] Wearable 7 - Marine Cap matches slot but file not found
+[DEBUG] Found wearable: 94 - Sweatband at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/94_Sweatband/94_Sweatband_front.aseprite
+[DEBUG] Found wearable: 218 - Mohawk at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/218_Mohawk/218_Mohawk_front.aseprite
+[DEBUG] Found wearable: 387 - Roflnoggin at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/387_Roflnoggin/387_Roflnoggin_front.aseprite
+[DEBUG] Slot 3 results: 70 checked, 70 matched slot, 3 exist, 3 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 4, total wearables in DB: 300
+[DEBUG] Wearable 3 - MK2 Grenade matches slot but file not found
+[DEBUG] Wearable 6 - M67 Grenade matches slot but file not found
+[DEBUG] Wearable 9 - Walkie Talkie matches slot but file not found
+[DEBUG] Found wearable: 69 - Pitchfork at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/69_Pitchfork/69_Pitchfork_front.aseprite
+[DEBUG] Found wearable: 70 - Handsaw at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/70_Handsaw/70_Handsaw_front.aseprite
+[DEBUG] Found wearable: 79 - Skateboard at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/79_Skateboard/79_Skateboard_front.aseprite
+[DEBUG] Slot 4 results: 76 checked, 76 matched slot, 14 exist, 14 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 5, total wearables in DB: 300
+[DEBUG] Wearable 3 - MK2 Grenade matches slot but file not found
+[DEBUG] Wearable 6 - M67 Grenade matches slot but file not found
+[DEBUG] Wearable 9 - Walkie Talkie matches slot but file not found
+[DEBUG] Found wearable: 69 - Pitchfork at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/69_Pitchfork/69_Pitchfork_front.aseprite
+[DEBUG] Found wearable: 70 - Handsaw at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/70_Handsaw/70_Handsaw_front.aseprite
+[DEBUG] Found wearable: 79 - Skateboard at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/79_Skateboard/79_Skateboard_front.aseprite
+[DEBUG] Slot 5 results: 69 checked, 69 matched slot, 14 exist, 14 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 9, total wearables in DB: 300
+[DEBUG] Slot 9 results: 0 checked, 0 matched slot, 0 exist, 0 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 10, total wearables in DB: 300
+[DEBUG] Slot 10 results: 0 checked, 0 matched slot, 0 exist, 0 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 11, total wearables in DB: 300
+[DEBUG] Slot 11 results: 0 checked, 0 matched slot, 0 exist, 0 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 6, total wearables in DB: 300
+[DEBUG] Wearable 35 - Aave Boat matches slot but file not found
+[DEBUG] Wearable 40 - Foxy Tail matches slot but file not found
+[DEBUG] Wearable 151 - Common Rofl matches slot but file not found
+[DEBUG] Found wearable: 353 - Nimbus at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/353_Nimbus/353_Nimbus_front.aseprite
+[DEBUG] Found wearable: 361 - Geo at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/361_Geo/361_Geo_front.aseprite
+[DEBUG] Slot 6 results: 22 checked, 22 matched slot, 2 exist, 2 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 7, total wearables in DB: 300
+[DEBUG] Wearable 210 - Haunt1 BG matches slot but file not found
+[DEBUG] Slot 7 results: 1 checked, 1 matched slot, 0 exist, 0 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 8, total wearables in DB: 300
+[DEBUG] Slot 8 results: 0 checked, 0 matched slot, 0 exist, 0 in dropdown
