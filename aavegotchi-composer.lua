@@ -1,7 +1,22 @@
 -- Aavegotchi Composer
 -- Loads and composes .aseprite files into a complete Aavegotchi sprite
 
-local FileResolver = dofile("file-resolver.lua")
+-- Helper to resolve script paths (works in both GUI and CLI)
+local function resolveScriptPath(scriptName)
+    -- Try relative path first (for GUI mode)
+    if app.fs.isFile(scriptName) then
+        return scriptName
+    end
+    -- Try absolute path (for CLI mode)
+    local absolutePath = "/Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/" .. scriptName
+    if app.fs.isFile(absolutePath) then
+        return absolutePath
+    end
+    -- Fallback to relative
+    return scriptName
+end
+
+local FileResolver = dofile(resolveScriptPath("file-resolver.lua"))
 
 local Composer = {}
 
@@ -139,6 +154,7 @@ local function loadAndCopySprite(filePath, targetSprite, targetLayerName)
                 app.activeSprite = sourceSprite
                 app.command.CloseFile()
             end
+            sourceSprite = nil  -- Clear reference immediately
         end
     end)
     
@@ -150,6 +166,12 @@ local function loadAndCopySprite(filePath, targetSprite, targetLayerName)
             app.activeSprite = originalSprite
         end
     end)
+    
+    -- Periodic garbage collection to prevent memory buildup
+    -- Only do this occasionally to avoid performance impact
+    if math.random(1, 10) == 1 then
+        collectgarbage("step")
+    end
     
     return success, errorMsg
 end

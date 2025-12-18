@@ -28,6 +28,7 @@
     "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><style>.gotchi-primary{fill:#000000;}\n    .gotchi-secondary{fill:#fbdfeb;}\n    .gotchi-cheek{fill:#f696c6;}\n    .gotchi-eyeColor{fill:#000000;}\n    .gotchi-primary-mouth{fill:#000000;}\n    .gotchi-sleeves-up{display:none;}\n    .gotchi-handsUp{display:none;}\n    .gotchi-handsDownOpen{display:block;}\n    .gotchi-handsDownClosed{display:none;}</style><g class=\"gotchi-primary\"><path d=\"M23 26H22H21V27V28H22H23V27V26Z\"/><path d=\"M29 27V26H28H27V27V28H28H29V27Z\"/><path d=\"M25 28H24H23V29V30H24H25H26H27V29V28H26H25Z\"/><path d=\"M43 28V27V26H42H41V27V28H42H43Z\"/><path d=\"M37 27V26H36H35V27V28H36H37V27Z\"/><path d=\"M37 30H38H39H40H41V29V28H40H39H38H37V29V30Z\"/></g></svg>"
   ],
   "shadow": [
-    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><g class=\"gotchi-shadow\"><path opacity=\".25\" d=\"M25 58H19v1h1v1h24V59h1V58h-1z\" fill=\"#000\"/></g></svg>"
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><g class=\"gotchi-shadow\"><path opacity=\".25\" d=\"M25 58H19v1h1v1h24V59h1V58h-1z\" fill=\"#000\"/></g></svg>",
+    "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><g class=\"gotchi-shadow\"><path d=\"M23 58v1h1v1h16v-1h1v-1z\" opacity=\".25\"/></g></svg>"
   ]
 }
