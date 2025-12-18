@@ -11,6 +11,89 @@ local function fileExists(path)
     return app.fs.isFile(path)
 end
 
+-- Helper: Try to find file with case variations
+local function findFileWithCaseVariations(basePath, collateral, handType)
+    handType = handType or "right"  -- "left" or "right"
+    
+    if _G.debugLogMessage then
+        _G.debugLogMessage("[DEBUG] Finding hands file - basePath: " .. basePath .. ", collateral: " .. collateral .. ", handType: " .. handType)
+    end
+    
+    -- Try exact path first
+    if fileExists(basePath) then
+        if _G.debugLogMessage then
+            _G.debugLogMessage("[DEBUG] Found hands file (exact match): " .. basePath)
+        end
+        return basePath
+    end
+    
+    -- Extract the directory
+    local dirMatch = basePath:match("^(.+)/hands/")
+    if not dirMatch then
+        if _G.debugLogMessage then
+            _G.debugLogMessage("[DEBUG] Could not extract directory from: " .. basePath)
+        end
+        return nil
+    end
+    
+    local handsDir = dirMatch .. "/hands/"
+    
+    if _G.debugLogMessage then
+        _G.debugLogMessage("[DEBUG] Looking in directory: " .. handsDir)
+    end
+    
+    -- Try common case variations
+    local variations = {
+        collateral,  -- original (try first)
+        collateral:lower(),  -- all lowercase
+        collateral:upper(),  -- all uppercase
+    }
+    
+    -- For patterns like amAAVE, maYFI, try preserving the prefix
+    if collateral:match("^am") or collateral:match("^ma") then
+        local prefix = collateral:sub(1, 2)
+        local rest = collateral:sub(3)
+        -- Try lowercase prefix with uppercase rest (most common: amAAVE)
+        table.insert(variations, prefix:lower() .. rest:upper())
+        -- Try uppercase prefix with uppercase rest (AMAAVE)
+        table.insert(variations, prefix:upper() .. rest:upper())
+        -- Try with first letter of rest uppercase
+        if #rest > 0 then
+            table.insert(variations, prefix:lower() .. rest:sub(1, 1):upper() .. rest:sub(2):lower())
+        end
+    end
+    
+    -- Remove duplicates
+    local seen = {}
+    local uniqueVariations = {}
+    for _, v in ipairs(variations) do
+        if not seen[v] then
+            seen[v] = true
+            table.insert(uniqueVariations, v)
+        end
+    end
+    
+    -- Try each variation
+    for _, variant in ipairs(uniqueVariations) do
+        local testPath = handsDir .. "hands_" .. handType .. "_" .. variant .. ".aseprite"
+        if _G.debugLogMessage then
+            _G.debugLogMessage("[DEBUG] Trying: " .. testPath)
+        end
+        if fileExists(testPath) then
+            if _G.debugLogMessage then
+                _G.debugLogMessage("[DEBUG] Found hands file: " .. testPath)
+            end
+            return testPath
+        end
+    end
+    
+    if _G.debugLogMessage then
+        _G.debugLogMessage("[DEBUG] No hands file found after trying all variations")
+    end
+    
+    return nil
+end
+
 -- Resolve body file path
 function FileResolver.resolveBodyPath(assetsPath, collateral, viewIndex)
     local viewName = viewNames[viewIndex + 1] or "front"
@@ -33,17 +116,53 @@ function FileResolver.resolveBodyPath(assetsPath, collateral, viewIndex)
 end
 
 -- Resolve hands file path
+-- For left view (viewIndex == 1), uses hands_left_{collateral}.aseprite
+-- For right view (viewIndex == 2), uses hands_right_{collateral}.aseprite
+-- For other views, uses hands_{pose}_{collateral}.aseprite
 function FileResolver.resolveHandsPath(assetsPath, collateral, pose, viewIndex)
-    local viewName = viewNames[viewIndex + 1] or "front"
+    -- Convert to number to ensure proper comparison
+    local viewIndexNum = tonumber(viewIndex) or 0
+    local viewName = viewNames[viewIndexNum + 1] or "front"
     
-    -- Try pattern: hands_{pose}_{collateral}.aseprite
+    -- Special handling for left view: use hands_left_{collateral}.aseprite
+    if viewIndexNum == 1 then  -- left view
+        local basePath = assetsPath .. "/Aseprites/Collaterals/" .. collateral .. "/hands/hands_left_" .. collateral .. ".aseprite"
+        local foundPath = findFileWithCaseVariations(basePath, collateral, "left")
+        if foundPath then
+            return foundPath
+        end
+    end
+    
+    -- Special handling for right view: use hands_right_{collateral}.aseprite
+    if viewIndexNum == 2 then  -- right view
+        if _G.debugLogMessage then
+            _G.debugLogMessage("[DEBUG] Resolving right view hands for collateral: " .. collateral)
+        end
+        local basePath = assetsPath .. "/Aseprites/Collaterals/" .. collateral .. "/hands/hands_right_" .. collateral .. ".aseprite"
+        if _G.debugLogMessage then
+            _G.debugLogMessage("[DEBUG] Base path: " .. basePath)
+        end
+        local foundPath = findFileWithCaseVariations(basePath, collateral, "right")
+        if foundPath then
+            if _G.debugLogMessage then
+                _G.debugLogMessage("[DEBUG] Found right hands file: " .. foundPath)
+            end
+            return foundPath
+        else
+            if _G.debugLogMessage then
+                _G.debugLogMessage("[DEBUG] Right hands file NOT FOUND for: " .. basePath)
+            end
+        end
+    end
+    
+    -- For other views, try pattern: hands_{pose}_{collateral}.aseprite
     local path1 = assetsPath .. "/Aseprites/Collaterals/" .. collateral .. "/hands/hands_" .. pose .. "_" .. collateral .. ".aseprite"
     if fileExists(path1) then
         return path1
     end
     
-    -- For side views, try hands_{view}_{collateral}.aseprite
-    if viewIndex == 1 or viewIndex == 2 then
+    -- For back view, try hands_{view}_{collateral}.aseprite
+    if viewIndex == 3 then
         local path2 = assetsPath .. "/Aseprites/Collaterals/" .. collateral .. "/hands/hands_" .. viewName .. "_" .. collateral .. ".aseprite"
         if fileExists(path2) then
             return path2
@@ -168,17 +287,51 @@ function FileResolver.scanForCollaterals(assetsPath)
     local collateralsDir = assetsPath .. "/Aseprites/Collaterals/"
     
     -- Known collateral names (we'll check which ones exist)
+    -- Try both case variations
     local knownCollaterals = {
         "amUSDC", "amUSDT", "amWETH", "amWBTC", "amAAVE", "amWMATIC", "amDAI",
-        "maUSDC", "maUSDT", "maWETH", "maDAI", "maAAVE", "maUNI", "maLINK", "maTUSD", "maYFI"
+        "maUSDC", "maUSDT", "maWETH", "maDAI", "maAAVE", "maUNI", "maLINK", "maTUSD", "maYFI",
+        -- Also try lowercase versions
+        "amusdc", "amusdt", "amweth", "amwbtc", "amaave", "amwmatic", "amdai",
+        "mausdc", "mausdt", "maweth", "madai", "maaave", "mauni", "malink", "matusd", "mayfi"
     }
     
+    local foundCollaterals = {}
     for _, collateral in ipairs(knownCollaterals) do
-        local bodyPath = collateralsDir .. collateral .. "/body/"
-        -- Check if directory exists by trying to resolve a body file
-        local bodyFile = FileResolver.resolveBodyPath(assetsPath, collateral, 0) -- Check front view
-        if bodyFile then
-            table.insert(collaterals, collateral)
+        -- Check if directory exists
+        local collateralDir = collateralsDir .. collateral .. "/"
+        if app.fs.isDirectory(collateralDir) then
+            -- Use the actual directory name (preserves case)
+            table.insert(foundCollaterals, collateral)
+        end
+    end
+    
+    -- Remove duplicates and prefer capitalized versions
+    local seen = {}
+    -- Helper function to check if value exists in table
+    local function tableContains(tbl, value)
+        for _, v in ipairs(tbl) do
+            if v == value then
+                return true
+            end
+        end
+        return false
+    end
+    
+    for _, collateral in ipairs(foundCollaterals) do
+        local key = collateral:lower()
+        if not seen[key] then
+            seen[key] = true
+            -- Prefer capitalized version
+            if collateral:match("^[a-z]") then
+                -- Try to find capitalized version
+                local capVersion = collateral:sub(1, 1):upper() .. collateral:sub(2)
+                if not tableContains(foundCollaterals, capVersion) then
+                    table.insert(collaterals, collateral)
+                end
+            else
+                table.insert(collaterals, collateral)
+            end
         end
     end
     

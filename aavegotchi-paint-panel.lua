@@ -125,7 +125,7 @@ local function refreshCollaterals(dlg, assetsPath)
 end
 
 -- Build wearable options list, filtering to only show wearables that exist in the directory
-local function buildWearableOptions(wearablesDb, slotIndex, assetsPath)
+local function buildWearableOptions(wearablesDb, slotIndex, assetsPath, viewIndex)
     local options = {""}  -- Empty option means no wearable
     
     if not wearablesDb or not wearablesDb.wearables then
@@ -135,8 +135,8 @@ local function buildWearableOptions(wearablesDb, slotIndex, assetsPath)
     
     debugLogMessage("[DEBUG] buildWearableOptions: Processing slot " .. slotIndex .. ", total wearables in DB: " .. #wearablesDb.wearables)
     
-    -- Get view index (default to front/0)
-    local viewIndex = 0
+    -- Get view index (default to front/0 if not provided)
+    viewIndex = viewIndex or 0
     local checkedCount = 0
     local matchedCount = 0
     local existsCount = 0
@@ -217,12 +217,12 @@ local function showPanel()
         end
     }
     
-    -- View selector (default to front for now)
+    -- View selector
     panelDlg:combobox{
         id = "view",
         label = "View:",
         option = "front",
-        options = {"front"}
+        options = {"front", "left", "right", "back"}
     }
     
     -- Collateral selector (will be populated when assets path is set)
@@ -294,10 +294,22 @@ local function showPanel()
         wearablesPath = app.fs.joinPath(app.fs.userConfigPath, "extensions", "aavegotchi-paint", "aavegotchi_db_wearables.json")
     end
     if not app.fs.isFile(wearablesPath) then
+        -- Try JSONs directory relative to assets path
+        local assetsPath = hardcodedAssetsPath
+        if assetsPath and assetsPath ~= "" then
+            local jsonPath = app.fs.joinPath(assetsPath, "JSONs", "aavegotchi_db_wearables.json")
+            if app.fs.isFile(jsonPath) then
+                wearablesPath = jsonPath
+            end
+        end
+    end
+    if not app.fs.isFile(wearablesPath) then
         -- Try extension directory
-        local scriptPath = app.fs.filePath(app.script.path)
-        if scriptPath then
-            wearablesPath = app.fs.joinPath(scriptPath, "aavegotchi_db_wearables.json")
+        if app.script and app.script.path then
+            local scriptPath = app.fs.filePath(app.script.path)
+            if scriptPath then
+                wearablesPath = app.fs.joinPath(scriptPath, "aavegotchi_db_wearables.json")
+            end
         end
     end
     
@@ -326,13 +338,21 @@ local function showPanel()
     -- Get assets path for filtering wearables
     local assetsPath = hardcodedAssetsPath
     
+    -- Get view index (default to front/0)
+    local viewName = panelDlg.data.view or "front"
+    local viewIndex = 0
+    if viewName == "left" then viewIndex = 1
+    elseif viewName == "right" then viewIndex = 2
+    elseif viewName == "back" then viewIndex = 3
+    end
+    
     -- Group wearables into sections for better organization
     -- Core wearables
     panelDlg:separator{text = "Core"}
     local coreSlots = {1, 2, 3, 4}  -- body, face, eyes, head
     for _, i in ipairs(coreSlots) do
         local slotName = slotNames[i]
-        local options = buildWearableOptions(wearablesDb, i - 1, assetsPath)
+        local options = buildWearableOptions(wearablesDb, i - 1, assetsPath, viewIndex)
         panelDlg:combobox{
             id = "wearable_" .. slotName,
             label = slotDisplayNames[i] .. ":",
@@ -346,7 +366,7 @@ local function showPanel()
     local handsSlots = {5, 6, 10, 11, 12}  -- right_hand, left_hand, hands, weapon_right, weapon_left
     for _, i in ipairs(handsSlots) do
         local slotName = slotNames[i]
-        local options = buildWearableOptions(wearablesDb, i - 1, assetsPath)
+        local options = buildWearableOptions(wearablesDb, i - 1, assetsPath, viewIndex)
         panelDlg:combobox{
             id = "wearable_" .. slotName,
             label = slotDisplayNames[i] .. ":",
@@ -360,7 +380,7 @@ local function showPanel()
     local accessorySlots = {7, 8, 9}  -- pet, background, aura
     for _, i in ipairs(accessorySlots) do
         local slotName = slotNames[i]
-        local options = buildWearableOptions(wearablesDb, i - 1, assetsPath)
+        local options = buildWearableOptions(wearablesDb, i - 1, assetsPath, viewIndex)
         panelDlg:combobox{
             id = "wearable_" .. slotName,
             label = slotDisplayNames[i] .. ":",
@@ -446,6 +466,10 @@ local function showPanel()
             elseif viewName == "back" then viewIndex = 3
             end
             
+            if _G.debugLogMessage then
+                _G.debugLogMessage("[DEBUG] Panel - viewName: " .. tostring(viewName) .. ", viewIndex: " .. tostring(viewIndex))
+            end
+            
             -- Collect wearables with names
             local selectedWearables = {}
             for i, slotName in ipairs(slotNames) do
@@ -483,6 +507,10 @@ local function showPanel()
                 wearables = selectedWearables,
                 canvasSize = tonumber(panelDlg.data.canvasSize) or 64
             }
+            
+            if _G.debugLogMessage then
+                _G.debugLogMessage("[DEBUG] Panel - Config.view: " .. tostring(config.view) .. " (type: " .. type(config.view) .. ")")
+            end
             
             -- Compose the Aavegotchi
             local result = Composer.composeAavegotchi(config, assetsPath, selectedWearables)

@@ -1,0 +1,64 @@
+Aavegotchi Paint Debug Log
+Generated: Tue Dec 16 15:53:52 2025
+=============================================================
+
+[DEBUG] Loading wearables database from: /Users/juliuswong/Library/Application Support/Aseprite/extensions/aavegotchi-paint/aavegotchi_db_wearables.json
+[DEBUG] JsonLoader: Extracted 300 wearables from JSON
+[DEBUG] JsonLoader: First wearable - ID: 1, Name: Camo Hat
+[DEBUG] JsonLoader: First wearable has 16 slot positions
+[DEBUG] Successfully loaded 300 wearables from database
+[DEBUG] First wearable: ID=1, Name=Camo Hat
+[DEBUG] First wearable slotPositions length: 16
+[DEBUG] buildWearableOptions: Processing slot 0, total wearables in DB: 300
+[DEBUG] Found wearable: 2 - Camo Pants at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/2_CamoPants/Front/2_CamoPants_Front.aseprite
+[DEBUG] Found wearable: 5 - Snow Camo Pants at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/5_SnowCamoPants/Front/5_SnowCamoPants_Front.aseprite
+[DEBUG] Found wearable: 8 - Marine Jacket at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/8_MarineJacket/Front/8_MarineJacket_Front.aseprite
+[DEBUG] Slot 0 results: 72 checked, 72 matched slot, 69 exist, 69 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 1, total wearables in DB: 300
+[DEBUG] Found wearable: 13 - Sergey Beard at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/13_SergeyBeard/13_SergeyBeard_front.aseprite
+[DEBUG] Found wearable: 18 - Aave Hero Mask at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/18_AaveHeroMask/18_AaveHeroMask_front.aseprite
+[DEBUG] Found wearable: 55 - Aagent Headset at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/55_AagentHeadset/55_AagentHeadset_front.aseprite
+[DEBUG] Slot 1 results: 26 checked, 26 matched slot, 24 exist, 24 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 2, total wearables in DB: 300
+[DEBUG] Found wearable: 14 - Sergey Eyes at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/14_SergeyEyes/14_SergeyEyes_front.aseprite
+[DEBUG] Found wearable: 36 - ETH Logo Glasses at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/36_ETHLogoGlasses/36_ETHLogoGlasses_front.aseprite
+[DEBUG] Found wearable: 49 - Coderdan Shades at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/49_CoderdanShades/49_CoderdanShades_front.aseprite
+[DEBUG] Slot 2 results: 31 checked, 31 matched slot, 31 exist, 31 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 3, total wearables in DB: 300
+[DEBUG] Found wearable: 1 - Camo Hat at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/1_CamoHat/1_CamoHat_front.aseprite
+[DEBUG] Found wearable: 4 - Snow Camo Hat at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/4_SnowCamoHat/4_SnowCamoHat_front.aseprite
+[DEBUG] Found wearable: 7 - Marine Cap at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/7_MarineCap/7_MarineCap_front.aseprite
+[DEBUG] Slot 3 results: 70 checked, 70 matched slot, 69 exist, 69 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 4, total wearables in DB: 300
+[DEBUG] Found wearable: 3 - MK2 Grenade at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/3_MK2Grenade/3_MK2Grenade_front.aseprite
+[DEBUG] Found wearable: 6 - M67 Grenade at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/6_M67Grenade/6_M67Grenade_front.aseprite
+[DEBUG] Found wearable: 9 - Walkie Talkie at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/9_WalkieTalkie/9_WalkieTalkie_front.aseprite
+[DEBUG] Slot 4 results: 76 checked, 76 matched slot, 73 exist, 73 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 5, total wearables in DB: 300
+[DEBUG] Found wearable: 3 - MK2 Grenade at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/3_MK2Grenade/3_MK2Grenade_front.aseprite
+[DEBUG] Found wearable: 6 - M67 Grenade at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/6_M67Grenade/6_M67Grenade_front.aseprite
+[DEBUG] Found wearable: 9 - Walkie Talkie at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/9_WalkieTalkie/9_WalkieTalkie_front.aseprite
+[DEBUG] Slot 5 results: 69 checked, 69 matched slot, 66 exist, 66 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 9, total wearables in DB: 300
+[DEBUG] Slot 9 results: 0 checked, 0 matched slot, 0 exist, 0 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 10, total wearables in DB: 300
+[DEBUG] Slot 10 results: 0 checked, 0 matched slot, 0 exist, 0 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 11, total wearables in DB: 300
+[DEBUG] Slot 11 results: 0 checked, 0 matched slot, 0 exist, 0 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 6, total wearables in DB: 300
+[DEBUG] Found wearable: 35 - Aave Boat at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/35_AaveBoat/35_AaveBoat_front.aseprite
+[DEBUG] Found wearable: 40 - Foxy Tail at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/40_FoxyTail/40_FoxyTail_front.aseprite
+[DEBUG] Found wearable: 151 - Common Rofl at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/151_CommonRofl/151_CommonRofl_front.aseprite
+[DEBUG] Slot 6 results: 22 checked, 22 matched slot, 19 exist, 19 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 7, total wearables in DB: 300
+[DEBUG] Found wearable: 210 - Haunt1 BG at /Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/Aseprites/Wearables/210_Haunt1BG/210_Haunt1BG_front.aseprite
+[DEBUG] Slot 7 results: 1 checked, 1 matched slot, 1 exist, 1 in dropdown
+[DEBUG] buildWearableOptions: Processing slot 8, total wearables in DB: 300
+[DEBUG] Slot 8 results: 0 checked, 0 matched slot, 0 exist, 0 in dropdown
+[DEBUG] Created new layer: 'Shadow (amAAVE)' (actual name: 'Shadow (amAAVE)')
+[DEBUG] Created new layer: 'Body (amAAVE)' (actual name: 'Body (amAAVE)')
+[DEBUG] Created new layer: 'Collateral (amAAVE)' (actual name: 'Collateral (amAAVE)')
+[DEBUG] Created new layer: 'Eyes (haunt1_id00_range0-1 - common)' (actual name: 'Eyes (haunt1_id00_range0-1 - common)')
+[DEBUG] Created new layer: 'Mouth (neutral)' (actual name: 'Mouth (neutral)')
+[DEBUG] Created new layer: 'Hands (down_open)' (actual name: 'Hands (down_open)')
+[DEBUG] No body wearable equipped - skipping sleeves

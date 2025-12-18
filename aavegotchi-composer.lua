@@ -25,6 +25,17 @@ local function copySpriteToLayer(sourceSprite, targetSprite, targetLayerName)
         if not targetLayer then
             return false, "Failed to create layer: " .. targetLayerName
         end
+        -- Explicitly set the layer name to ensure it's properly set
+        targetLayer.name = targetLayerName
+        if _G.debugLogMessage then
+            _G.debugLogMessage("[DEBUG] Created new layer: '" .. targetLayerName .. "' (actual name: '" .. targetLayer.name .. "')")
+        end
+    else
+        -- Even if layer exists, ensure it has the correct name
+        targetLayer.name = targetLayerName
+        if _G.debugLogMessage then
+            _G.debugLogMessage("[DEBUG] Reused existing layer: '" .. targetLayerName .. "' (actual name: '" .. targetLayer.name .. "')")
+        end
     end
     
     -- Get target frame (use first frame)
@@ -146,14 +157,23 @@ end
 -- Compose Aavegotchi from configuration
 -- config should contain: collateral, view, handPose, eyeRange, eyeRarity, mouthExpression, wearables, canvasSize
 -- wearablesWithNames should be a table of {slot = {id = id, name = name}}
+-- view: 0 = front, 1 = left, 2 = right, 3 = back
 function Composer.composeAavegotchi(config, assetsPath, wearablesWithNames)
     local collateral = config.collateral
-    local viewIndex = config.view or 0
+    local viewIndex = config.view or 0  -- 0=front, 1=left, 2=right, 3=back
     local handPose = config.handPose or "down_open"
     local eyeExpression = config.eyeExpression or "happy"
     local mouthExpression = config.mouthExpression or "neutral"
     local wearables = config.wearables or {}
     local canvasSize = config.canvasSize or 64
+    
+    if _G.debugLogMessage then
+        _G.debugLogMessage("[DEBUG] ===== COMPOSING AAVEGOTCHI =====")
+        _G.debugLogMessage("[DEBUG] Collateral: " .. tostring(collateral))
+        _G.debugLogMessage("[DEBUG] ViewIndex: " .. tostring(viewIndex) .. " (type: " .. type(viewIndex) .. ")")
+        _G.debugLogMessage("[DEBUG] Config.view: " .. tostring(config.view))
+        _G.debugLogMessage("[DEBUG] HandPose: " .. tostring(handPose))
+    end
     
     -- Create new sprite
     local sprite = Sprite(canvasSize, canvasSize, ColorMode.RGB)
@@ -173,10 +193,21 @@ function Composer.composeAavegotchi(config, assetsPath, wearablesWithNames)
     -- Load and compose each part
     local errors = {}
     
+    -- Convert viewIndex to number for comparisons
+    local viewIndexNum = tonumber(viewIndex) or 0
+    
+    if _G.debugLogMessage then
+        _G.debugLogMessage("[DEBUG] viewIndexNum for back view check: " .. tostring(viewIndexNum) .. " (back view = 3)")
+        _G.debugLogMessage("[DEBUG] Will skip collateral: " .. tostring(viewIndexNum == 3))
+        _G.debugLogMessage("[DEBUG] Will skip eyes: " .. tostring(viewIndexNum == 3))
+        _G.debugLogMessage("[DEBUG] Will skip mouth (create blank): " .. tostring(viewIndexNum == 3))
+    end
+    
     -- 1. Shadow
     local shadowPath = FileResolver.resolveShadowPath(assetsPath, collateral, viewIndex)
     if shadowPath then
-        local ok, err = loadAndCopySprite(shadowPath, sprite, "Shadow")
+        local shadowLayerName = "Shadow (" .. collateral .. ")"
+        local ok, err = loadAndCopySprite(shadowPath, sprite, shadowLayerName)
         if not ok then
             table.insert(errors, "Shadow: " .. (err or "Failed"))
         end
@@ -189,61 +220,106 @@ function Composer.composeAavegotchi(config, assetsPath, wearablesWithNames)
         local ok, err = loadAndCopySprite(bodyPath, sprite, bodyLayerName)
         if not ok then
             table.insert(errors, "Body: " .. (err or "Failed"))
+        else
+            -- For side views, we may need to hide mouth pixels in the body layer
+            -- This will be handled after all layers are loaded
         end
     else
         table.insert(errors, "Body: File not found")
     end
     
-    -- 3. Collateral (if exists)
-    local viewName = (viewIndex == 0 and "front" or viewIndex == 1 and "left" or viewIndex == 2 and "right" or "back")
-    local collateralPath = assetsPath .. "/Aseprites/Collaterals/" .. collateral .. "/collateral/collateral_" .. viewName .. "_" .. collateral .. ".aseprite"
-    if app.fs.isFile(collateralPath) then
-        local ok, err = loadAndCopySprite(collateralPath, sprite, "Collateral")
-        if not ok then
-            -- Not a critical error, collateral might not exist for all views
+    -- 3. Collateral (if exists) - Skip for back view
+    if viewIndexNum ~= 3 then  -- Back view (3) should not show collateral
+        local viewName = (viewIndex == 0 and "front" or viewIndex == 1 and "left" or viewIndex == 2 and "right" or viewIndex == 3 and "back" or "front")
+        local collateralPath = assetsPath .. "/Aseprites/Collaterals/" .. collateral .. "/collateral/collateral_" .. viewName .. "_" .. collateral .. ".aseprite"
+        if app.fs.isFile(collateralPath) then
+            local collateralLayerName = "Collateral (" .. collateral .. ")"
+            local ok, err = loadAndCopySprite(collateralPath, sprite, collateralLayerName)
+            if not ok then
+                -- Not a critical error, collateral might not exist for all views
+            end
         end
     end
     
-    -- 4. Eyes (uses selected eye range and rarity)
-    local eyeRange = config.eyeRange
-    local eyeRarity = config.eyeRarity
-    if eyeRange and eyeRarity then
-        local eyesPath = FileResolver.resolveEyesPath(assetsPath, collateral, eyeRange, eyeRarity, viewIndex)
-        if eyesPath then
-            local eyesLayerName = "Eyes (" .. eyeRange .. " - " .. eyeRarity .. ")"
-            local ok, err = loadAndCopySprite(eyesPath, sprite, eyesLayerName)
-            if not ok then
-                table.insert(errors, "Eyes: " .. (err or "Failed"))
+    -- 4. Eyes (uses selected eye range and rarity) - Skip for back view
+    if viewIndexNum ~= 3 then  -- Back view (3) should not show eyes
+        local eyeRange = config.eyeRange
+        local eyeRarity = config.eyeRarity
+        if eyeRange and eyeRarity then
+            local eyesPath = FileResolver.resolveEyesPath(assetsPath, collateral, eyeRange, eyeRarity, viewIndex)
+            if eyesPath then
+                local eyesLayerName = "Eyes (" .. eyeRange .. " - " .. eyeRarity .. ")"
+                local ok, err = loadAndCopySprite(eyesPath, sprite, eyesLayerName)
+                if not ok then
+                    table.insert(errors, "Eyes: " .. (err or "Failed"))
+                end
+            else
+                table.insert(errors, "Eyes: File not found (range: " .. eyeRange .. ", rarity: " .. eyeRarity .. ")")
             end
         else
-            table.insert(errors, "Eyes: File not found (range: " .. eyeRange .. ", rarity: " .. eyeRarity .. ")")
+            table.insert(errors, "Eyes: Eye range and rarity not specified")
         end
-    else
-        table.insert(errors, "Eyes: Eye range and rarity not specified")
     end
     
-    -- 5. Mouth
-    local mouthPath = FileResolver.resolveMouthPath(assetsPath, collateral, mouthExpression)
-    if mouthPath then
-        local mouthLayerName = "Mouth (" .. mouthExpression .. ")"
-        local ok, err = loadAndCopySprite(mouthPath, sprite, mouthLayerName)
-        if not ok then
-            table.insert(errors, "Mouth: " .. (err or "Failed"))
+    -- 5. Mouth (for side views and back view, create blank layer; for front view, load mouth sprite)
+    if _G.debugLogMessage then
+        _G.debugLogMessage("[DEBUG] Checking mouth - viewIndex: " .. tostring(viewIndex) .. " (num: " .. tostring(viewIndexNum) .. ")")
+        _G.debugLogMessage("[DEBUG] viewIndexNum == 1: " .. tostring(viewIndexNum == 1) .. ", viewIndexNum == 2: " .. tostring(viewIndexNum == 2) .. ", viewIndexNum == 3: " .. tostring(viewIndexNum == 3))
+    end
+    
+    local mouthLayerName = "Mouth (" .. mouthExpression .. ")"
+    
+    if viewIndexNum == 1 or viewIndexNum == 2 or viewIndexNum == 3 then  -- Left, right, or back view - create blank layer
+        if _G.debugLogMessage then
+            _G.debugLogMessage("[DEBUG] Creating blank mouth layer for side/back view (viewIndex: " .. tostring(viewIndex) .. ", num: " .. tostring(viewIndexNum) .. ")")
         end
-    else
-        table.insert(errors, "Mouth: File not found")
+        -- Create a blank transparent layer for mouth
+        local mouthLayer = sprite:newLayer(mouthLayerName)
+        if mouthLayer then
+            local targetFrame = sprite.frames[1]
+            if not targetFrame then
+                targetFrame = sprite:newFrame(1)
+            end
+            -- Create blank transparent image
+            local blankImage = Image(canvasSize, canvasSize, ColorMode.RGB)
+            sprite:newCel(mouthLayer, targetFrame, blankImage)
+            if _G.debugLogMessage then
+                _G.debugLogMessage("[DEBUG] Created blank mouth layer: " .. mouthLayerName)
+            end
+        else
+            table.insert(errors, "Mouth: Failed to create blank layer")
+        end
+    else  -- Front (0) view - load mouth sprite
+        if _G.debugLogMessage then
+            _G.debugLogMessage("[DEBUG] Loading mouth for viewIndex: " .. tostring(viewIndex) .. " (front view)")
+        end
+        local mouthPath = FileResolver.resolveMouthPath(assetsPath, collateral, mouthExpression)
+        if mouthPath then
+            local ok, err = loadAndCopySprite(mouthPath, sprite, mouthLayerName)
+            if not ok then
+                table.insert(errors, "Mouth: " .. (err or "Failed"))
+            end
+        else
+            table.insert(errors, "Mouth: File not found")
+        end
     end
     
     -- 6. Hands
     local handsPath = FileResolver.resolveHandsPath(assetsPath, collateral, handPose, viewIndex)
     if handsPath then
         local handsLayerName = "Hands (" .. handPose .. ")"
+        if _G.debugLogMessage then
+            _G.debugLogMessage("[DEBUG] Loading hands from: " .. handsPath)
+        end
         local ok, err = loadAndCopySprite(handsPath, sprite, handsLayerName)
         if not ok then
             table.insert(errors, "Hands: " .. (err or "Failed"))
         end
     else
-        table.insert(errors, "Hands: File not found")
+        table.insert(errors, "Hands: File not found (viewIndex: " .. viewIndex .. ", collateral: " .. collateral .. ")")
+        if _G.debugLogMessage then
+            _G.debugLogMessage("[DEBUG] Hands file not found for viewIndex: " .. viewIndex .. ", collateral: " .. collateral)
+        end
     end
     
     -- 7. Wearables
@@ -302,22 +378,25 @@ function Composer.composeAavegotchi(config, assetsPath, wearablesWithNames)
                 _G.debugLogMessage("[DEBUG] Sleeves found, loading...")
             end
             -- sleevesPath might be a single file (string) or two files (table with left and right)
+            local sleeveType = (handPose == "up" and "Up" or "Down")
             if type(sleevesPath) == "table" and #sleevesPath == 2 then
                 -- Two files: left and right sleeves
                 -- Load left sleeve first (will be on a lower layer)
-                local ok, err = loadAndCopySprite(sleevesPath[1], sprite, "Sleeves Left (" .. (handPose == "up" and "Up" or "Down") .. ")")
+                local sleeveLayerName = "Sleeves Left (" .. bodyWearableData.name .. " - " .. sleeveType .. ")"
+                local ok, err = loadAndCopySprite(sleevesPath[1], sprite, sleeveLayerName)
                 if not ok then
                     table.insert(errors, "Sleeves Left: " .. (err or "Failed"))
                 end
                 -- Then right sleeve (higher layer)
-                local ok2, err2 = loadAndCopySprite(sleevesPath[2], sprite, "Sleeves Right (" .. (handPose == "up" and "Up" or "Down") .. ")")
+                sleeveLayerName = "Sleeves Right (" .. bodyWearableData.name .. " - " .. sleeveType .. ")"
+                local ok2, err2 = loadAndCopySprite(sleevesPath[2], sprite, sleeveLayerName)
                 if not ok2 then
                     table.insert(errors, "Sleeves Right: " .. (err2 or "Failed"))
                 end
             elseif type(sleevesPath) == "string" then
                 -- Single file with sleeves
-                local sleeveType = (handPose == "up" and "Up" or "Down")
-                local ok, err = loadAndCopySprite(sleevesPath, sprite, "Sleeves (" .. sleeveType .. ")")
+                local sleeveLayerName = "Sleeves (" .. bodyWearableData.name .. " - " .. sleeveType .. ")"
+                local ok, err = loadAndCopySprite(sleevesPath, sprite, sleeveLayerName)
                 if not ok then
                     table.insert(errors, "Sleeves: " .. (err or "Failed"))
                 end
@@ -325,6 +404,10 @@ function Composer.composeAavegotchi(config, assetsPath, wearablesWithNames)
         end
         -- If sleeves file doesn't exist, that's OK - not all body wearables have separate sleeve files
     end
+    
+    -- Note: For side views (left/right) and back view, we already created a blank mouth layer above
+    -- Only front view loads the mouth sprite
+    -- Back view only shows: Shadow, Body, and Hands (no Collateral, Eyes, or Mouth)
     
     -- Refresh display
     app.refresh()
