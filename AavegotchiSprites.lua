@@ -10,6 +10,9 @@ print("=== AavegotchiSprites ===")
 print("Collateral: " .. collateral)
 print("")
 
+-- Save original active sprite (for GUI mode)
+local originalActiveSprite = app.activeSprite
+
 -- Determine paths
 local bodyPath = assetsPath .. "/Aseprites/Collaterals/" .. collateral .. "/body"
 local handsPath = assetsPath .. "/Aseprites/Collaterals/" .. collateral .. "/hands"
@@ -45,7 +48,10 @@ app.activeSprite = sheetSprite
 local sheetFrame = sheetSprite.frames[1]
 if not sheetFrame then
     print("ERROR: No frame found")
-    os.exit(1)
+    if originalActiveSprite then
+        app.activeSprite = originalActiveSprite
+    end
+    return
 end
 
 -- Remove default layer if it exists
@@ -135,7 +141,111 @@ for viewIdx, viewInfo in ipairs(views) do
                 -- Ensure sheet sprite is active before creating layers
                 app.activeSprite = sheetSprite
                 
-                -- Create layer for normal frame
+                -- FIRST: Create shadow layers (they should be at the bottom/behind everything)
+                -- Process shadows for this view
+                print("  Processing shadows...")
+                local shadow00FilePath = shadowPath .. "/shadow_00_" .. collateral .. ".aseprite"
+                local shadow01FilePath = shadowPath .. "/shadow_01_" .. collateral .. ".aseprite"
+                
+                -- Process shadow_00 for normal frame
+                if app.fs.isFile(shadow00FilePath) then
+                    local shadow00Sprite = nil
+                    local ok, err = pcall(function()
+                        shadow00Sprite = app.open(shadow00FilePath)
+                    end)
+                    
+                    if ok and shadow00Sprite then
+                        app.activeSprite = shadow00Sprite
+                        
+                        local shadow00Frame = nil
+                        local shadow00LayerSrc = nil
+                        local shadow00Cel = nil
+                        
+                        ok, err = pcall(function()
+                            if #shadow00Sprite.frames > 0 then
+                                shadow00Frame = shadow00Sprite.frames[1]
+                            end
+                            if #shadow00Sprite.layers > 0 then
+                                shadow00LayerSrc = shadow00Sprite.layers[1]
+                            end
+                            if shadow00Frame and shadow00LayerSrc then
+                                shadow00Cel = shadow00LayerSrc:cel(shadow00Frame)
+                            end
+                        end)
+                        
+                        if ok and shadow00Cel and shadow00Cel.image then
+                            app.activeSprite = sheetSprite
+                            local shadowLayerNameNormal = viewInfo.name .. " - Shadow_00 (Frame " .. frameNumNormal .. ")"
+                            print("  Creating shadow layer: " .. shadowLayerNameNormal)
+                            local shadowLayerNormal = sheetSprite:newLayer(shadowLayerNameNormal)
+                            shadowLayerNormal.name = shadowLayerNameNormal
+                            
+                            local shadowImageNormal = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+                            shadowImageNormal:drawImage(shadow00Cel.image, Point(xNormal, yNormal))
+                            sheetSprite:newCel(shadowLayerNormal, sheetFrame, shadowImageNormal)
+                            shadowImageNormal = nil
+                            print("  Normal shadow positioned at (" .. xNormal .. ", " .. yNormal .. ")")
+                            
+                            shadow00Cel = nil
+                        end
+                        
+                        pcall(function() app.activeSprite = shadow00Sprite; app.command.CloseFile() end)
+                        shadow00Sprite = nil
+                        app.activeSprite = sheetSprite
+                        collectgarbage("step")
+                    end
+                end
+                
+                -- Process shadow_01 for offset frame
+                if app.fs.isFile(shadow01FilePath) then
+                    local shadow01Sprite = nil
+                    local ok, err = pcall(function()
+                        shadow01Sprite = app.open(shadow01FilePath)
+                    end)
+                    
+                    if ok and shadow01Sprite then
+                        app.activeSprite = shadow01Sprite
+                        
+                        local shadow01Frame = nil
+                        local shadow01LayerSrc = nil
+                        local shadow01Cel = nil
+                        
+                        ok, err = pcall(function()
+                            if #shadow01Sprite.frames > 0 then
+                                shadow01Frame = shadow01Sprite.frames[1]
+                            end
+                            if #shadow01Sprite.layers > 0 then
+                                shadow01LayerSrc = shadow01Sprite.layers[1]
+                            end
+                            if shadow01Frame and shadow01LayerSrc then
+                                shadow01Cel = shadow01LayerSrc:cel(shadow01Frame)
+                            end
+                        end)
+                        
+                        if ok and shadow01Cel and shadow01Cel.image then
+                            app.activeSprite = sheetSprite
+                            local shadowLayerNameOffset = viewInfo.name .. " - Shadow_01 (Frame " .. frameNumOffset .. ")"
+                            print("  Creating shadow layer: " .. shadowLayerNameOffset)
+                            local shadowLayerOffset = sheetSprite:newLayer(shadowLayerNameOffset)
+                            shadowLayerOffset.name = shadowLayerNameOffset
+                            
+                            local shadowImageOffset = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+                            shadowImageOffset:drawImage(shadow01Cel.image, Point(xOffset, yOffset))
+                            sheetSprite:newCel(shadowLayerOffset, sheetFrame, shadowImageOffset)
+                            shadowImageOffset = nil
+                            print("  Offset shadow positioned at (" .. xOffset .. ", " .. yOffset .. ")")
+                            
+                            shadow01Cel = nil
+                        end
+                        
+                        pcall(function() app.activeSprite = shadow01Sprite; app.command.CloseFile() end)
+                        shadow01Sprite = nil
+                        app.activeSprite = sheetSprite
+                        collectgarbage("step")
+                    end
+                end
+                
+                -- SECOND: Create body layers
                 local layerNameNormal = viewInfo.name .. " - Body (Frame " .. frameNumNormal .. ")"
                 print("  Creating layer: " .. layerNameNormal)
                 local bodyLayerNormal = sheetSprite:newLayer(layerNameNormal)
@@ -152,6 +262,7 @@ for viewIdx, viewInfo in ipairs(views) do
                 local layerNameOffset = viewInfo.name .. " - Body (Frame " .. frameNumOffset .. ", y=-1)"
                 print("  Creating layer: " .. layerNameOffset)
                 local bodyLayerOffset = sheetSprite:newLayer(layerNameOffset)
+                bodyLayerOffset.name = layerNameOffset  -- Explicitly set layer name
                 
                 -- Create image for offset position (y=-1)
                 local layerImageOffset = Image(sheetWidth, sheetHeight, ColorMode.RGB)
@@ -252,6 +363,7 @@ for viewIdx, viewInfo in ipairs(views) do
                 local handLayerNameOffset = viewInfo.name .. " - Hands (Frame " .. frameNumOffset .. ", y=-1)"
                 print("  Creating hand layer: " .. handLayerNameOffset)
                 local handLayerOffset = sheetSprite:newLayer(handLayerNameOffset)
+                handLayerOffset.name = handLayerNameOffset  -- Explicitly set layer name
                 
                 -- Create image for offset position hands (y=-1)
                 local handImageOffset = Image(sheetWidth, sheetHeight, ColorMode.RGB)
@@ -353,6 +465,7 @@ for viewIdx, viewInfo in ipairs(views) do
                     local collateralLayerNameOffset = viewInfo.name .. " - Collateral (Frame " .. frameNumOffset .. ", y=-1)"
                     print("  Creating collateral layer: " .. collateralLayerNameOffset)
                     local collateralLayerOffset = sheetSprite:newLayer(collateralLayerNameOffset)
+                    collateralLayerOffset.name = collateralLayerNameOffset  -- Explicitly set layer name
                     
                     -- Create image for offset position collateral (y=-1)
                     local collateralImageOffset = Image(sheetWidth, sheetHeight, ColorMode.RGB)
@@ -382,128 +495,6 @@ for viewIdx, viewInfo in ipairs(views) do
         print("  Skipping collateral (back view)")
     end
     
-    -- Now process shadows for this view
-    -- shadow_00 goes in frames 1,3,5,7 (normal frames)
-    -- shadow_01 goes in frames 2,4,6,8 (offset frames)
-    print("  Processing shadows...")
-    
-    local shadow00FilePath = shadowPath .. "/shadow_00_" .. collateral .. ".aseprite"
-    local shadow01FilePath = shadowPath .. "/shadow_01_" .. collateral .. ".aseprite"
-    
-    -- Calculate grid positions
-    local row = viewIdx - 1
-    local frameNumNormal = (viewIdx * 2) - 1
-    local frameNumOffset = viewIdx * 2
-    local xNormal = 0 * FRAME_WIDTH
-    local yNormal = row * FRAME_HEIGHT
-    local xOffset = 1 * FRAME_WIDTH
-    local yOffset = row * FRAME_HEIGHT
-    
-    -- Process shadow_00 for normal frame
-    if app.fs.isFile(shadow00FilePath) then
-        local shadow00Sprite = nil
-        local ok, err = pcall(function()
-            shadow00Sprite = app.open(shadow00FilePath)
-        end)
-        
-        if ok and shadow00Sprite then
-            app.activeSprite = shadow00Sprite
-            
-            local shadow00Frame = nil
-            local shadow00LayerSrc = nil
-            local shadow00Cel = nil
-            
-            ok, err = pcall(function()
-                if #shadow00Sprite.frames > 0 then
-                    shadow00Frame = shadow00Sprite.frames[1]
-                end
-                if #shadow00Sprite.layers > 0 then
-                    shadow00LayerSrc = shadow00Sprite.layers[1]
-                end
-                if shadow00Frame and shadow00LayerSrc then
-                    shadow00Cel = shadow00LayerSrc:cel(shadow00Frame)
-                end
-            end)
-            
-            if ok and shadow00Cel and shadow00Cel.image then
-                app.activeSprite = sheetSprite
-                
-                local shadowLayerNameNormal = viewInfo.name .. " - Shadow_00 (Frame " .. frameNumNormal .. ")"
-                print("  Creating shadow layer: " .. shadowLayerNameNormal)
-                local shadowLayerNormal = sheetSprite:newLayer(shadowLayerNameNormal)
-                shadowLayerNormal.name = shadowLayerNameNormal  -- Explicitly set layer name
-                
-                local shadowImageNormal = Image(sheetWidth, sheetHeight, ColorMode.RGB)
-                shadowImageNormal:drawImage(shadow00Cel.image, Point(xNormal, yNormal))
-                sheetSprite:newCel(shadowLayerNormal, sheetFrame, shadowImageNormal)
-                shadowImageNormal = nil
-                print("  Normal shadow positioned at (" .. xNormal .. ", " .. yNormal .. ")")
-                
-                shadow00Cel = nil
-            end
-            
-            pcall(function()
-                app.activeSprite = shadow00Sprite
-                app.command.CloseFile()
-            end)
-            shadow00Sprite = nil
-            app.activeSprite = sheetSprite
-            collectgarbage("step")
-        end
-    end
-    
-    -- Process shadow_01 for offset frame
-    if app.fs.isFile(shadow01FilePath) then
-        local shadow01Sprite = nil
-        local ok, err = pcall(function()
-            shadow01Sprite = app.open(shadow01FilePath)
-        end)
-        
-        if ok and shadow01Sprite then
-            app.activeSprite = shadow01Sprite
-            
-            local shadow01Frame = nil
-            local shadow01LayerSrc = nil
-            local shadow01Cel = nil
-            
-            ok, err = pcall(function()
-                if #shadow01Sprite.frames > 0 then
-                    shadow01Frame = shadow01Sprite.frames[1]
-                end
-                if #shadow01Sprite.layers > 0 then
-                    shadow01LayerSrc = shadow01Sprite.layers[1]
-                end
-                if shadow01Frame and shadow01LayerSrc then
-                    shadow01Cel = shadow01LayerSrc:cel(shadow01Frame)
-                end
-            end)
-            
-            if ok and shadow01Cel and shadow01Cel.image then
-                app.activeSprite = sheetSprite
-                
-                local shadowLayerNameOffset = viewInfo.name .. " - Shadow_01 (Frame " .. frameNumOffset .. ", y=-1)"
-                print("  Creating shadow layer: " .. shadowLayerNameOffset)
-                local shadowLayerOffset = sheetSprite:newLayer(shadowLayerNameOffset)
-                shadowLayerOffset.name = shadowLayerNameOffset  -- Explicitly set layer name
-                
-                local shadowImageOffset = Image(sheetWidth, sheetHeight, ColorMode.RGB)
-                shadowImageOffset:drawImage(shadow01Cel.image, Point(xOffset, yOffset))
-                sheetSprite:newCel(shadowLayerOffset, sheetFrame, shadowImageOffset)
-                shadowImageOffset = nil
-                print("  Offset shadow positioned at (" .. xOffset .. ", " .. yOffset .. ")")
-                
-                shadow01Cel = nil
-            end
-            
-            pcall(function()
-                app.activeSprite = shadow01Sprite
-                app.command.CloseFile()
-            end)
-            shadow01Sprite = nil
-            app.activeSprite = sheetSprite
-            collectgarbage("step")
-        end
-    end
     
     -- Force garbage collection after each view
     collectgarbage("collect")
@@ -514,19 +505,55 @@ end
 -- Save the sprite sheet
 local outputPath = assetsPath .. "/Output/aavegotchi-sprites-" .. collateral:lower() .. ".aseprite"
 print("Saving to: " .. outputPath)
-sheetSprite:saveAs(outputPath)
+
+ok, err = pcall(function()
+    app.activeSprite = sheetSprite
+    sheetSprite:saveAs(outputPath)
+end)
+
+if not ok then
+    print("ERROR: Failed to save sprite: " .. (err or "Unknown error"))
+    if originalActiveSprite then
+        app.activeSprite = originalActiveSprite
+    end
+    return
+end
+
 print("Saved successfully")
 
 print("")
 print("SUCCESS: Sprite sheet created!")
 print("Dimensions: " .. sheetSprite.width .. "x" .. sheetSprite.height)
-print("Frames: " .. #sheetSprite.frames)
-print("Layers: " .. #sheetSprite.layers)
 
--- List all layers
-for i, layer in ipairs(sheetSprite.layers) do
-    print("  Layer " .. i .. ": " .. (layer.name or "unnamed"))
+ok, err = pcall(function()
+    print("Frames: " .. #sheetSprite.frames)
+    print("Layers: " .. #sheetSprite.layers)
+    
+    -- List all layers
+    for i, layer in ipairs(sheetSprite.layers) do
+        print("  Layer " .. i .. ": " .. (layer.name or "unnamed"))
+    end
+end)
+
+if not ok then
+    print("WARNING: Could not list layer details: " .. (err or "Unknown error"))
 end
+
+-- Final cleanup: Clear references and restore original sprite
+-- Don't close the sprite in CLI mode as it can cause crashes
+-- Just clear the reference and let Aseprite handle cleanup on exit
+if originalActiveSprite then
+    pcall(function()
+        app.activeSprite = originalActiveSprite
+    end)
+end
+
+-- Clear sprite reference (but don't close it - let Aseprite handle that)
+sheetSprite = nil
+
+-- Final garbage collection
+collectgarbage("collect")
 
 print("")
 print("=== Complete ===")
+

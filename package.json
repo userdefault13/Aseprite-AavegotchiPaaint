@@ -18,10 +18,16 @@
         "path": "./generate-sprite-sheets-command.lua",
         "title": "Generate All Sprite Sheets",
         "group": "tools"
+      },
+      {
+        "path": "./aavegotchi-spritesheet-maker-panel.lua",
+        "title": "Aavegotchi Sprite Sheet Maker",
+        "group": "tools"
       }
     ]
   },
   "dependencies": {},
   "license": "MIT"
 }
+
 

@@ -541,6 +541,26 @@ local function showPanel()
     panelDlg:show{wait=false, autoscrollbars=true}
 end
 
--- Initialize and show panel
-showPanel()
+-- Register the plugin with menu command
+function init(plugin)
+    -- Keep existing Tools menu command
+    plugin:newCommand{
+        id = "aavegotchi_paint",
+        title = "Aavegotchi Paint",
+        group = "tools",
+        onenabled = function() return true end,
+        onclick = showPanel
+    }
+    
+    -- Add new File menu command (like SVG Import)
+    plugin:newCommand{
+        id = "aavegotchi_paint_file",
+        title = "Aavegotchi Paint",
+        group = "file_import",
+        onenabled = function() return true end,
+        onclick = showPanel
+    }
+end
+
+return plugin
 
