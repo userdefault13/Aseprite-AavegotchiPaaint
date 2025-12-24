@@ -370,9 +370,18 @@ local function showPanel()
                 return
             end
             
-            app.alert("Generating sprite sheet...\n\nThis may take a moment.\nCheck the console for progress.")
+            app.alert("Generating body sprite sheet...\n\nThis may take a moment.\nCheck the console for progress.")
             
-            local sheetSprite, err = SpriteSheetGenerator.generateSpriteSheet(assetsPath, collateral)
+            -- Construct JSON path: JSONs/Body/collateral-base-{collateral}.json
+            local jsonPath = assetsPath .. "/JSONs/Body/collateral-base-" .. collateral:lower() .. ".json"
+            
+            -- Check if JSON file exists
+            if not app.fs.isFile(jsonPath) then
+                app.alert("JSON file not found:\n" .. jsonPath)
+                return
+            end
+            
+            local sheetSprite, err = SpriteSheetGenerator.generateBodySpriteSheet(collateral, jsonPath, assetsPath)
             
             if not sheetSprite then
                 app.alert("Error creating sprite sheet: " .. (err or "Unknown error"))
@@ -380,7 +389,7 @@ local function showPanel()
             end
             
             -- Save the sprite sheet
-            local outputPath = assetsPath .. "/Output/aavegotchi-sprites-" .. collateral:lower() .. ".aseprite"
+            local outputPath = assetsPath .. "/Output/aavegotchi-body-sprites-" .. collateral:lower() .. ".aseprite"
             
             ok, saveErr = pcall(function()
                 app.activeSprite = sheetSprite
@@ -438,4 +447,5 @@ end
 
 -- Initialize and show panel
 showPanel()
+
 

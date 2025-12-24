@@ -403,5 +403,497 @@ function SpriteSheetGenerator.generateSpriteSheet(assetsPath, collateral)
     return sheetSprite, nil
 end
 
+-- Helper function to resolve script paths (works in both GUI and CLI)
+local function resolveScriptPath(scriptName)
+    -- Try relative path first (for GUI mode)
+    if app.fs.isFile(scriptName) then
+        return scriptName
+    end
+    -- Try absolute path (for CLI mode)
+    local absolutePath = "/Users/juliuswong/Dev/Aseprite-AavegotchiPaaint/" .. scriptName
+    if app.fs.isFile(absolutePath) then
+        return absolutePath
+    end
+    -- Fallback to relative
+    return scriptName
+end
+
+-- Helper function to convert SVG string to Image
+-- Uses SVG importer modules if available, otherwise returns error
+local function svgStringToImage(svgString, width, height)
+    -- Try to load SVG importer modules
+    local svgParserPath = nil
+    local svgRendererPath = nil
+    
+    -- Check multiple possible paths for SVG modules
+    local possiblePaths = {
+        "/Users/juliuswong/Dev/aesprite-svgimporter/extracted/svg-parser.lua",
+        "../aesprite-svgimporter/extracted/svg-parser.lua",
+        "aesprite-svgimporter/extracted/svg-parser.lua",
+        app.fs.joinPath(app.fs.userConfigPath, "extensions/aesprite-svgimporter/extracted/svg-parser.lua")
+    }
+    
+    for _, path in ipairs(possiblePaths) do
+        if app.fs.isFile(path) then
+            svgParserPath = path
+            svgRendererPath = path:gsub("svg%-parser%.lua", "svg-renderer-professional.lua")
+            break
+        end
+    end
+    
+    if not svgParserPath or not app.fs.isFile(svgParserPath) then
+        return nil, "SVG parser module not found. Please ensure aesprite-svgimporter extension is installed."
+    end
+    
+    if not svgRendererPath or not app.fs.isFile(svgRendererPath) then
+        return nil, "SVG renderer module not found. Please ensure aesprite-svgimporter extension is installed."
+    end
+    
+    -- Load SVG modules
+    local SVGParser = dofile(svgParserPath)
+    local SVGRenderer = dofile(svgRendererPath)
+    
+    if not SVGParser or not SVGRenderer then
+        return nil, "Failed to load SVG parser or renderer modules"
+    end
+    
+    -- Parse SVG
+    local svgData = SVGParser.parse(svgString)
+    if not svgData or not svgData.viewBox then
+        return nil, "Failed to parse SVG"
+    end
+    
+    -- Render to pixels
+    local renderResult = SVGRenderer.render(svgData, width, height)
+    if not renderResult or not renderResult.pixels or #renderResult.pixels == 0 then
+        return nil, "No pixels rendered from SVG"
+    end
+    
+    -- Create image and draw pixels
+    local image = Image(width, height, ColorMode.RGB)
+    
+    for _, pixel in ipairs(renderResult.pixels) do
+        if pixel.x >= 0 and pixel.x < width and pixel.y >= 0 and pixel.y < height then
+            local color = Color{r = pixel.color.r, g = pixel.color.g, b = pixel.color.b}
+            image:drawPixel(pixel.x, pixel.y, color)
+        end
+    end
+    
+    return image, nil
+end
+
+-- Helper function to apply Y offset to an image
+local function applyYOffsetToImage(image, yOffset)
+    if not image or yOffset == 0 then
+        return image
+    end
+    
+    local newImage = Image(image.width, image.height, ColorMode.RGB)
+    newImage:drawImage(image, Point(0, yOffset))
+    return newImage
+end
+
+-- Parse JSON file to extract body array
+local function parseBodyJson(jsonPath)
+    local file = io.open(jsonPath, "r")
+    if not file then
+        return nil, "Failed to open JSON file: " .. jsonPath
+    end
+    
+    local jsonContent = file:read("*all")
+    file:close()
+    
+    if not jsonContent or jsonContent == "" then
+        return nil, "JSON file is empty"
+    end
+    
+    -- Simple parser to extract body array
+    local bodyArray = {}
+    local bodyStart = jsonContent:find('"body"%s*:%s*%[')
+    if not bodyStart then
+        return nil, "Could not find 'body' array in JSON"
+    end
+    
+    local arrayStart = jsonContent:find('%[', bodyStart)
+    local inString = false
+    local escapeNext = false
+    local currentString = ""
+    
+    for i = arrayStart + 1, #jsonContent do
+        local char = jsonContent:sub(i, i)
+        
+        if escapeNext then
+            if inString then
+                -- Handle escape sequences
+                if char == '"' then
+                    currentString = currentString .. '"'
+                elseif char == '\\' then
+                    currentString = currentString .. '\\'
+                elseif char == 'n' then
+                    currentString = currentString .. '\n'
+                elseif char == 't' then
+                    currentString = currentString .. '\t'
+                else
+                    currentString = currentString .. char
+                end
+            end
+            escapeNext = false
+        elseif char == '\\' then
+            escapeNext = true
+        elseif char == '"' then
+            if inString then
+                -- End of string
+                table.insert(bodyArray, currentString)
+                currentString = ""
+                inString = false
+            else
+                -- Start of string
+                inString = true
+            end
+        elseif inString then
+            currentString = currentString .. char
+        elseif char == ']' and not inString then
+            break
+        end
+    end
+    
+    if #bodyArray < 6 then
+        return nil, "Expected at least 6 body views, found " .. #bodyArray
+    end
+    
+    -- Return first 6 entries
+    local firstSix = {}
+    for i = 1, 6 do
+        table.insert(firstSix, bodyArray[i])
+    end
+    
+    return firstSix, nil
+end
+
+-- Parse JSON file to extract hands array
+local function parseHandsJson(jsonPath)
+    local file = io.open(jsonPath, "r")
+    if not file then
+        return nil, "Failed to open JSON file: " .. jsonPath
+    end
+    
+    local jsonContent = file:read("*all")
+    file:close()
+    
+    if not jsonContent or jsonContent == "" then
+        return nil, "JSON file is empty"
+    end
+    
+    -- Simple parser to extract hands array
+    local handsArray = {}
+    local handsStart = jsonContent:find('"hands"%s*:%s*%[')
+    if not handsStart then
+        return nil, "Could not find 'hands' array in JSON"
+    end
+    
+    local arrayStart = jsonContent:find('%[', handsStart)
+    local inString = false
+    local escapeNext = false
+    local currentString = ""
+    
+    for i = arrayStart + 1, #jsonContent do
+        local char = jsonContent:sub(i, i)
+        
+        if escapeNext then
+            if inString then
+                -- Handle escape sequences
+                if char == '"' then
+                    currentString = currentString .. '"'
+                elseif char == '\\' then
+                    currentString = currentString .. '\\'
+                elseif char == 'n' then
+                    currentString = currentString .. '\n'
+                elseif char == 't' then
+                    currentString = currentString .. '\t'
+                else
+                    currentString = currentString .. char
+                end
+            end
+            escapeNext = false
+        elseif char == '\\' then
+            escapeNext = true
+        elseif char == '"' then
+            if inString then
+                -- End of string
+                table.insert(handsArray, currentString)
+                currentString = ""
+                inString = false
+            else
+                -- Start of string
+                inString = true
+            end
+        elseif inString then
+            currentString = currentString .. char
+        elseif char == ']' and not inString then
+            break
+        end
+    end
+    
+    if #handsArray < 6 then
+        return nil, "Expected at least 6 hands views, found " .. #handsArray
+    end
+    
+    -- Return first 6 entries
+    local firstSix = {}
+    for i = 1, 6 do
+        table.insert(firstSix, handsArray[i])
+    end
+    
+    return firstSix, nil
+end
+
+-- Generate body spritesheet from JSON file
+function SpriteSheetGenerator.generateBodySpriteSheet(collateral, jsonPath, assetsPath)
+    print("=== Body Sprite Sheet Generator ===")
+    print("Collateral: " .. collateral)
+    print("JSON Path: " .. jsonPath)
+    print("")
+    
+    -- Save original active sprite
+    local originalActiveSprite = app.activeSprite
+    
+    -- Validate JSON path exists
+    if not app.fs.isFile(jsonPath) then
+        local errMsg = "JSON file not found: " .. jsonPath
+        print("ERROR: " .. errMsg)
+        return nil, errMsg
+    end
+    
+    -- Parse JSON file
+    local bodyArray, err = parseBodyJson(jsonPath)
+    if not bodyArray then
+        local errMsg = err or "Failed to parse JSON"
+        print("ERROR: " .. errMsg)
+        return nil, errMsg
+    end
+    
+    print("Loaded " .. #bodyArray .. " body views from JSON")
+    
+    -- Create sprite: 128x384 (2 columns × 6 rows of 64x64 cells)
+    local sheetWidth = 128
+    local sheetHeight = 384
+    local frameWidth = 64
+    local frameHeight = 64
+    
+    print("Creating sprite: " .. sheetWidth .. "x" .. sheetHeight)
+    local sheetSprite = nil
+    local ok, err = pcall(function()
+        sheetSprite = Sprite(sheetWidth, sheetHeight, ColorMode.RGB)
+        app.activeSprite = sheetSprite
+    end)
+    
+    if not ok or not sheetSprite then
+        return nil, "Failed to create sprite: " .. (err or "Unknown error")
+    end
+    
+    -- Remove default layer
+    ok, err = pcall(function()
+        app.activeSprite = sheetSprite
+        if #sheetSprite.layers > 0 then
+            local defaultLayer = sheetSprite.layers[1]
+            sheetSprite:deleteLayer(defaultLayer)
+        end
+    end)
+    
+    -- Get frame 1 and create frame 2
+    local frame1 = sheetSprite.frames[1]
+    local frame2 = sheetSprite:newFrame(2)
+    
+    if not frame1 or not frame2 then
+        if originalActiveSprite then
+            app.activeSprite = originalActiveSprite
+        end
+        return nil, "Failed to create frames"
+    end
+    
+    -- Process each view (front, front up, front down closed, left, right, back) - create separate layer for each
+    local viewNames = {"Front", "Front - Up", "Front - Down Closed", "Left", "Right", "Back"}
+    for viewIndex = 0, 5 do
+        local svgString = bodyArray[viewIndex + 1]  -- Lua is 1-indexed
+        local viewName = viewNames[viewIndex + 1]
+        
+        print("Processing " .. viewName .. " view...")
+        
+        -- Convert SVG string to Image
+        local baseImage, err = svgStringToImage(svgString, frameWidth, frameHeight)
+        if not baseImage then
+            print("  ERROR: Failed to convert SVG: " .. (err or "Unknown error"))
+            if originalActiveSprite then
+                app.activeSprite = originalActiveSprite
+            end
+            return nil, "Failed to convert SVG for " .. viewName .. " view: " .. (err or "Unknown error")
+        end
+        
+        -- Create layer for this view with descriptive label
+        local layerName = viewName .. " - Body"
+        local viewLayer = sheetSprite:newLayer(layerName)
+        
+        -- Create canvas images for both frames
+        local frame1Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        local frame2Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        
+        -- Calculate positions
+        local yPos = viewIndex * frameHeight
+        local leftColX = 0
+        local rightColX = 64
+        
+        -- Create offset version once (used in both frames)
+        local offsetImage = applyYOffsetToImage(baseImage, -1)
+        
+        -- Frame 1: Left column = base views, Right column = offset views
+        frame1Image:drawImage(baseImage, Point(leftColX, yPos))
+        frame1Image:drawImage(offsetImage, Point(rightColX, yPos))
+        
+        -- Frame 2: Left column = offset views, Right column = offset views (same as right of frame 1)
+        frame2Image:drawImage(offsetImage, Point(leftColX, yPos))
+        frame2Image:drawImage(offsetImage, Point(rightColX, yPos))
+        
+        -- Create cels for this view layer
+        sheetSprite:newCel(viewLayer, frame1, frame1Image)
+        sheetSprite:newCel(viewLayer, frame2, frame2Image)
+        
+        print("  Created layer: " .. viewName)
+        print("  Frame 1: base at (" .. leftColX .. ", " .. yPos .. "), offset at (" .. rightColX .. ", " .. yPos .. ")")
+        print("  Frame 2: offset at (" .. leftColX .. ", " .. yPos .. "), offset at (" .. rightColX .. ", " .. yPos .. ")")
+    end
+    
+    print("SUCCESS: Body sprite sheet created!")
+    print("Dimensions: " .. sheetWidth .. "x" .. sheetHeight)
+    print("Frames: 2")
+    
+    -- Return the sprite
+    app.activeSprite = sheetSprite
+    return sheetSprite, nil
+end
+
+-- Generate hands spritesheet from JSON file
+function SpriteSheetGenerator.generateHandsSpriteSheet(collateral, jsonPath, assetsPath)
+    print("=== Hands Sprite Sheet Generator ===")
+    print("Collateral: " .. collateral)
+    print("JSON Path: " .. jsonPath)
+    print("")
+    
+    -- Save original active sprite
+    local originalActiveSprite = app.activeSprite
+    
+    -- Validate JSON path exists
+    if not app.fs.isFile(jsonPath) then
+        local errMsg = "JSON file not found: " .. jsonPath
+        print("ERROR: " .. errMsg)
+        return nil, errMsg
+    end
+    
+    -- Parse JSON file
+    local handsArray, err = parseHandsJson(jsonPath)
+    if not handsArray then
+        local errMsg = err or "Failed to parse JSON"
+        print("ERROR: " .. errMsg)
+        return nil, errMsg
+    end
+    
+    print("Loaded " .. #handsArray .. " hands views from JSON")
+    
+    -- Create sprite: 128x384 (2 columns × 6 rows of 64x64 cells)
+    local sheetWidth = 128
+    local sheetHeight = 384
+    local frameWidth = 64
+    local frameHeight = 64
+    
+    print("Creating sprite: " .. sheetWidth .. "x" .. sheetHeight)
+    local sheetSprite = nil
+    local ok, err = pcall(function()
+        sheetSprite = Sprite(sheetWidth, sheetHeight, ColorMode.RGB)
+        app.activeSprite = sheetSprite
+    end)
+    
+    if not ok or not sheetSprite then
+        return nil, "Failed to create sprite: " .. (err or "Unknown error")
+    end
+    
+    -- Remove default layer
+    ok, err = pcall(function()
+        app.activeSprite = sheetSprite
+        if #sheetSprite.layers > 0 then
+            local defaultLayer = sheetSprite.layers[1]
+            sheetSprite:deleteLayer(defaultLayer)
+        end
+    end)
+    
+    -- Get frame 1 and create frame 2
+    local frame1 = sheetSprite.frames[1]
+    local frame2 = sheetSprite:newFrame(2)
+    
+    if not frame1 or not frame2 then
+        if originalActiveSprite then
+            app.activeSprite = originalActiveSprite
+        end
+        return nil, "Failed to create frames"
+    end
+    
+    -- Process each view (front, front up, front down closed, left, right, back) - create separate layer for each
+    local viewNames = {"Front", "Front - Up", "Front - Down Closed", "Left", "Right", "Back"}
+    for viewIndex = 0, 5 do
+        local svgString = handsArray[viewIndex + 1]  -- Lua is 1-indexed
+        local viewName = viewNames[viewIndex + 1]
+        
+        print("Processing " .. viewName .. " view...")
+        
+        -- Convert SVG string to Image
+        local baseImage, err = svgStringToImage(svgString, frameWidth, frameHeight)
+        if not baseImage then
+            print("  ERROR: Failed to convert SVG: " .. (err or "Unknown error"))
+            if originalActiveSprite then
+                app.activeSprite = originalActiveSprite
+            end
+            return nil, "Failed to convert SVG for " .. viewName .. " view: " .. (err or "Unknown error")
+        end
+        
+        -- Create layer for this view with descriptive label
+        local layerName = viewName .. " - Hands"
+        local viewLayer = sheetSprite:newLayer(layerName)
+        
+        -- Create canvas images for both frames
+        local frame1Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        local frame2Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        
+        -- Calculate positions
+        local yPos = viewIndex * frameHeight
+        local leftColX = 0
+        local rightColX = 64
+        
+        -- Create offset version once (used in both frames)
+        local offsetImage = applyYOffsetToImage(baseImage, -1)
+        
+        -- Frame 1: Left column = base views, Right column = offset views
+        frame1Image:drawImage(baseImage, Point(leftColX, yPos))
+        frame1Image:drawImage(offsetImage, Point(rightColX, yPos))
+        
+        -- Frame 2: Left column = offset views, Right column = offset views (same as right of frame 1)
+        frame2Image:drawImage(offsetImage, Point(leftColX, yPos))
+        frame2Image:drawImage(offsetImage, Point(rightColX, yPos))
+        
+        -- Create cels for this view layer
+        sheetSprite:newCel(viewLayer, frame1, frame1Image)
+        sheetSprite:newCel(viewLayer, frame2, frame2Image)
+        
+        print("  Created layer: " .. layerName)
+        print("  Frame 1: base at (" .. leftColX .. ", " .. yPos .. "), offset at (" .. rightColX .. ", " .. yPos .. ")")
+        print("  Frame 2: offset at (" .. leftColX .. ", " .. yPos .. "), offset at (" .. rightColX .. ", " .. yPos .. ")")
+    end
+    
+    print("SUCCESS: Hands sprite sheet created!")
+    print("Dimensions: " .. sheetWidth .. "x" .. sheetHeight)
+    print("Frames: 2")
+    
+    -- Return the sprite
+    app.activeSprite = sheetSprite
+    return sheetSprite, nil
+end
+
 return SpriteSheetGenerator
 
