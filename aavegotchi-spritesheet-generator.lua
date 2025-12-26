@@ -418,9 +418,84 @@ local function resolveScriptPath(scriptName)
     return scriptName
 end
 
+-- Helper function to fix CSS class issues by replacing classes with inline fill colors
+-- This is needed because the SVG renderer doesn't always handle multiple CSS classes correctly
+local function fixSvgClassColors(svgString)
+    -- Extract CSS color definitions from <style> tag
+    local primaryColor = nil
+    local secondaryColor = nil
+    local styleContent = svgString:match("<style>(.-)</style>")
+    if styleContent then
+        -- Extract .gotchi-primary{fill:#color;} - handle newlines and whitespace
+        primaryColor = styleContent:match("%.gotchi%-primary[^}]*fill%s*:%s*#([%w]+)")
+        secondaryColor = styleContent:match("%.gotchi%-secondary[^}]*fill%s*:%s*#([%w]+)")
+    end
+    
+    if not primaryColor and not secondaryColor then
+        return svgString -- No colors to apply
+    end
+    
+    print("DEBUG fixSvgClassColors: primaryColor=" .. (primaryColor or "nil") .. ", secondaryColor=" .. (secondaryColor or "nil"))
+    
+    -- Fix paths with gotchi-primary class - add inline fill attribute
+    local fixed = svgString
+    local modified = false
+    
+    if primaryColor then
+        -- Match self-closing paths: <path ... class="...gotchi-primary..." />
+        local beforeSelfClose = fixed
+        fixed = fixed:gsub('(<path)([^>]*class="[^"]*gotchi%-primary[^"]*")([^>]*)/>', function(open, classPart, rest)
+            if not (classPart .. rest):match('fill%s*=') then
+                modified = true
+                return open .. classPart .. rest .. ' fill="#' .. primaryColor .. '"/>'
+            end
+            return open .. classPart .. rest .. '/>'
+        end)
+        
+        -- Match regular paths: <path ... class="...gotchi-primary..." >
+        fixed = fixed:gsub('(<path)([^>]*class="[^"]*gotchi%-primary[^"]*")([^>]*)>', function(open, classPart, rest)
+            if not (classPart .. rest):match('fill%s*=') then
+                modified = true
+                return open .. classPart .. rest .. ' fill="#' .. primaryColor .. '">'
+            end
+            return open .. classPart .. rest .. '>'
+        end)
+    end
+    
+    if secondaryColor then
+        -- Match self-closing paths with gotchi-secondary
+        fixed = fixed:gsub('(<path)([^>]*class="[^"]*gotchi%-secondary[^"]*")([^>]*)/>', function(open, classPart, rest)
+            if not (classPart .. rest):match('fill%s*=') then
+                modified = true
+                return open .. classPart .. rest .. ' fill="#' .. secondaryColor .. '"/>'
+            end
+            return open .. classPart .. rest .. '/>'
+        end)
+        
+        -- Match regular paths with gotchi-secondary
+        fixed = fixed:gsub('(<path)([^>]*class="[^"]*gotchi%-secondary[^"]*")([^>]*)>', function(open, classPart, rest)
+            if not (classPart .. rest):match('fill%s*=') then
+                modified = true
+                return open .. classPart .. rest .. ' fill="#' .. secondaryColor .. '">'
+            end
+            return open .. classPart .. rest .. '>'
+        end)
+    end
+    
+    if modified then
+        print("DEBUG: SVG was modified to add inline fill colors")
+    else
+        print("DEBUG: SVG was NOT modified (no matching paths found or fills already exist)")
+    end
+    
+    return fixed
+end
+
 -- Helper function to convert SVG string to Image
 -- Uses SVG importer modules if available, otherwise returns error
 local function svgStringToImage(svgString, width, height)
+    -- Fix CSS class color issues before rendering
+    svgString = fixSvgClassColors(svgString)
     -- Try to load SVG importer modules
     local svgParserPath = nil
     local svgRendererPath = nil
@@ -472,12 +547,25 @@ local function svgStringToImage(svgString, width, height)
     -- Create image and draw pixels
     local image = Image(width, height, ColorMode.RGB)
     
-    for _, pixel in ipairs(renderResult.pixels) do
-        if pixel.x >= 0 and pixel.x < width and pixel.y >= 0 and pixel.y < height then
-            local color = Color{r = pixel.color.r, g = pixel.color.g, b = pixel.color.b}
-            image:drawPixel(pixel.x, pixel.y, color)
+    -- Wrap pixel drawing in transaction for better performance and proper color handling
+    app.transaction(
+        function()
+            for _, pixel in ipairs(renderResult.pixels) do
+                if pixel.x >= 0 and pixel.x < width and pixel.y >= 0 and pixel.y < height then
+                    -- Check if pixel has valid color data and alpha > 0
+                    if pixel.color and (not pixel.color.a or pixel.color.a > 0) then
+                        local color = Color{
+                            r = pixel.color.r or 0,
+                            g = pixel.color.g or 0,
+                            b = pixel.color.b or 0,
+                            a = pixel.color.a or 255
+                        }
+                        image:drawPixel(pixel.x, pixel.y, color)
+                    end
+                end
+            end
         end
-    end
+    )
     
     return image, nil
 end
@@ -634,17 +722,300 @@ local function parseHandsJson(jsonPath)
         end
     end
     
-    if #handsArray < 6 then
-        return nil, "Expected at least 6 hands views, found " .. #handsArray
+    if #handsArray < 5 then
+        return nil, "Expected at least 5 hands views, found " .. #handsArray
     end
     
-    -- Return first 6 entries
-    local firstSix = {}
-    for i = 1, 6 do
-        table.insert(firstSix, handsArray[i])
+    -- Return first 5 entries (we'll reuse index 1 for back view)
+    local firstFive = {}
+    for i = 1, 5 do
+        table.insert(firstFive, handsArray[i])
     end
     
-    return firstSix, nil
+    return firstFive, nil
+end
+
+-- Parse JSON file to extract useItem/weapon array
+local function parseWeaponJson(jsonPath)
+    local file = io.open(jsonPath, "r")
+    if not file then
+        return nil, "Failed to open JSON file: " .. jsonPath
+    end
+    
+    local jsonContent = file:read("*all")
+    file:close()
+    
+    if not jsonContent or jsonContent == "" then
+        return nil, "JSON file is empty"
+    end
+    
+    -- Simple parser to extract useItem/weapon array
+    local weaponArray = {}
+    local weaponStart = jsonContent:find('"useItem/weapon"%s*:%s*%[')
+    if not weaponStart then
+        return nil, "Could not find 'useItem/weapon' array in JSON"
+    end
+    
+    local arrayStart = jsonContent:find('%[', weaponStart)
+    local inString = false
+    local escapeNext = false
+    local currentString = ""
+    
+    for i = arrayStart + 1, #jsonContent do
+        local char = jsonContent:sub(i, i)
+        
+        if escapeNext then
+            if inString then
+                -- Handle escape sequences
+                if char == '"' then
+                    currentString = currentString .. '"'
+                elseif char == '\\' then
+                    currentString = currentString .. '\\'
+                elseif char == 'n' then
+                    currentString = currentString .. '\n'
+                elseif char == 't' then
+                    currentString = currentString .. '\t'
+                else
+                    currentString = currentString .. char
+                end
+            end
+            escapeNext = false
+        elseif char == '\\' then
+            escapeNext = true
+        elseif char == '"' then
+            if inString then
+                -- End of string
+                table.insert(weaponArray, currentString)
+                currentString = ""
+                inString = false
+            else
+                -- Start of string
+                inString = true
+            end
+        elseif inString then
+            currentString = currentString .. char
+        elseif char == ']' and not inString then
+            break
+        end
+    end
+    
+    if #weaponArray < 10 then
+        return nil, "Expected at least 10 weapon views, found " .. #weaponArray
+    end
+    
+    return weaponArray, nil
+end
+
+-- Parse JSON file to extract takeDamage arrays
+local function parseTakeDamageJson(jsonPath)
+    local file = io.open(jsonPath, "r")
+    if not file then
+        return nil, "Failed to open JSON file: " .. jsonPath
+    end
+    
+    local jsonContent = file:read("*all")
+    file:close()
+    
+    if not jsonContent or jsonContent == "" then
+        return nil, "JSON file is empty"
+    end
+    
+    local takeDamageData = {
+        front = {},
+        left = {},
+        right = {},
+        back = {}
+    }
+    
+    -- Parse each takeDamage array
+    local views = {"front", "left", "right", "back"}
+    for _, view in ipairs(views) do
+        local arrayName = '"takeDamage/' .. view .. '"'
+        local arrayStart = jsonContent:find(arrayName .. '%s*:%s*%[')
+        if arrayStart then
+            local bracketStart = jsonContent:find('%[', arrayStart)
+            local inString = false
+            local escapeNext = false
+            local currentString = ""
+            
+            for i = bracketStart + 1, #jsonContent do
+                local char = jsonContent:sub(i, i)
+                
+                if escapeNext then
+                    if inString then
+                        if char == '"' then
+                            currentString = currentString .. '"'
+                        elseif char == '\\' then
+                            currentString = currentString .. '\\'
+                        elseif char == 'n' then
+                            currentString = currentString .. '\n'
+                        elseif char == 't' then
+                            currentString = currentString .. '\t'
+                        else
+                            currentString = currentString .. char
+                        end
+                    end
+                    escapeNext = false
+                elseif char == '\\' then
+                    escapeNext = true
+                elseif char == '"' then
+                    if inString then
+                        table.insert(takeDamageData[view], currentString)
+                        currentString = ""
+                        inString = false
+                    else
+                        inString = true
+                    end
+                elseif inString then
+                    currentString = currentString .. char
+                elseif char == ']' and not inString then
+                    break
+                end
+            end
+        end
+    end
+    
+    return takeDamageData, nil
+end
+
+-- Parse JSON file to extract death array
+local function parseDeathJson(jsonPath)
+    local file = io.open(jsonPath, "r")
+    if not file then
+        return nil, "Failed to open JSON file: " .. jsonPath
+    end
+    
+    local jsonContent = file:read("*all")
+    file:close()
+    
+    if not jsonContent or jsonContent == "" then
+        return nil, "JSON file is empty"
+    end
+    
+    local deathArray = {}
+    local deathStart = jsonContent:find('"death"%s*:%s*%[')
+    if not deathStart then
+        return nil, "Could not find 'death' array in JSON"
+    end
+    
+    local arrayStart = jsonContent:find('%[', deathStart)
+    local inString = false
+    local escapeNext = false
+    local currentString = ""
+    
+    for i = arrayStart + 1, #jsonContent do
+        local char = jsonContent:sub(i, i)
+        
+        if escapeNext then
+            if inString then
+                if char == '"' then
+                    currentString = currentString .. '"'
+                elseif char == '\\' then
+                    currentString = currentString .. '\\'
+                elseif char == 'n' then
+                    currentString = currentString .. '\n'
+                elseif char == 't' then
+                    currentString = currentString .. '\t'
+                else
+                    currentString = currentString .. char
+                end
+            end
+            escapeNext = false
+        elseif char == '\\' then
+            escapeNext = true
+        elseif char == '"' then
+            if inString then
+                table.insert(deathArray, currentString)
+                currentString = ""
+                inString = false
+            else
+                inString = true
+            end
+        elseif inString then
+            currentString = currentString .. char
+        elseif char == ']' and not inString then
+            break
+        end
+    end
+    
+    return deathArray, nil
+end
+
+-- Parse JSON file to extract takeDamage/hands object
+local function parseHandTakeDamageJson(jsonPath)
+    local file = io.open(jsonPath, "r")
+    if not file then
+        return nil, "Failed to open JSON file: " .. jsonPath
+    end
+    
+    local jsonContent = file:read("*all")
+    file:close()
+    
+    if not jsonContent or jsonContent == "" then
+        return nil, "JSON file is empty"
+    end
+    
+    local handTakeDamageData = {
+        frontDown = {},
+        frontUp = {},
+        left = {},
+        right = {}
+    }
+    
+    -- Parse each takeDamage/hands array
+    local views = {"frontDown", "frontUp", "left", "right"}
+    for _, view in ipairs(views) do
+        -- Find the takeDamage/hands object first
+        local handsStart = jsonContent:find('"takeDamage/hands"%s*:%s*%{')
+        if handsStart then
+            -- Find the specific view array within the hands object
+            local viewPattern = '"' .. view .. '"%s*:%s*%['
+            local viewStart = jsonContent:find(viewPattern, handsStart)
+            if viewStart then
+                local bracketStart = jsonContent:find('%[', viewStart)
+                local inString = false
+                local escapeNext = false
+                local currentString = ""
+                
+                for i = bracketStart + 1, #jsonContent do
+                    local char = jsonContent:sub(i, i)
+                    
+                    if escapeNext then
+                        if inString then
+                            if char == '"' then
+                                currentString = currentString .. '"'
+                            elseif char == '\\' then
+                                currentString = currentString .. '\\'
+                            elseif char == 'n' then
+                                currentString = currentString .. '\n'
+                            elseif char == 't' then
+                                currentString = currentString .. '\t'
+                            else
+                                currentString = currentString .. char
+                            end
+                        end
+                        escapeNext = false
+                    elseif char == '\\' then
+                        escapeNext = true
+                    elseif char == '"' then
+                        if inString then
+                            table.insert(handTakeDamageData[view], currentString)
+                            currentString = ""
+                            inString = false
+                        else
+                            inString = true
+                        end
+                    elseif inString then
+                        currentString = currentString .. char
+                    elseif char == ']' and not inString then
+                        break
+                    end
+                end
+            end
+        end
+    end
+    
+    return handTakeDamageData, nil
 end
 
 -- Generate body spritesheet from JSON file
@@ -674,8 +1045,27 @@ function SpriteSheetGenerator.generateBodySpriteSheet(collateral, jsonPath, asse
     
     print("Loaded " .. #bodyArray .. " body views from JSON")
     
-    -- Create sprite: 128x384 (2 columns × 6 rows of 64x64 cells)
-    local sheetWidth = 128
+    -- Parse takeDamage and death arrays
+    local takeDamageData, err = parseTakeDamageJson(jsonPath)
+    if not takeDamageData then
+        print("WARNING: Could not parse takeDamage arrays: " .. (err or "Unknown error"))
+        takeDamageData = {front = {}, left = {}, right = {}, back = {}}
+    else
+        print("Loaded takeDamage arrays: front=" .. #takeDamageData.front .. ", left=" .. #takeDamageData.left .. 
+              ", right=" .. #takeDamageData.right .. ", back=" .. #takeDamageData.back)
+    end
+    
+    local deathArray, err = parseDeathJson(jsonPath)
+    if not deathArray then
+        print("WARNING: Could not parse death array: " .. (err or "Unknown error"))
+        deathArray = {}
+    else
+        print("Loaded " .. #deathArray .. " death frames from JSON")
+    end
+    
+    -- Create sprite: 1088x384 (17 columns × 6 rows of 64x64 cells)
+    -- Original 5 columns (0-256) + 12 new columns (320-1024) = 1088px
+    local sheetWidth = 1088
     local sheetHeight = 384
     local frameWidth = 64
     local frameHeight = 64
@@ -700,71 +1090,429 @@ function SpriteSheetGenerator.generateBodySpriteSheet(collateral, jsonPath, asse
         end
     end)
     
-    -- Get frame 1 and create frame 2
-    local frame1 = sheetSprite.frames[1]
-    local frame2 = sheetSprite:newFrame(2)
+    -- Get frame 1 and create frames 2-12 (total 12 frames)
+    -- Frames 1-2: Base frames (existing)
+    -- Frames 3-5: Take damage animation (3 frames)
+    -- Frames 6-12: Death animation (7 frames)
+    local frames = {sheetSprite.frames[1]}
     
-    if not frame1 or not frame2 then
+    for i = 2, 12 do
+        local newFrame = sheetSprite:newFrame(i)
+        table.insert(frames, newFrame)
+    end
+    
+    if not frames[1] or #frames < 12 then
         if originalActiveSprite then
             app.activeSprite = originalActiveSprite
         end
         return nil, "Failed to create frames"
     end
     
-    -- Process each view (front, front up, front down closed, left, right, back) - create separate layer for each
-    local viewNames = {"Front", "Front - Up", "Front - Down Closed", "Left", "Right", "Back"}
-    for viewIndex = 0, 5 do
-        local svgString = bodyArray[viewIndex + 1]  -- Lua is 1-indexed
-        local viewName = viewNames[viewIndex + 1]
+    -- Body array indices: 1=Front, 2=Front-Up, 3=Front-Down Closed, 4=Left, 5=Right, 6=Back
+    -- Convert all body views to images first
+    local bodyImages = {}
+    local bodyNames = {"Front", "Front - Up", "Front - Down Closed", "Left", "Right", "Back"}
+    for i = 1, math.min(#bodyArray, 6) do
+        local svgString = bodyArray[i]
+        local bodyImage, err = svgStringToImage(svgString, frameWidth, frameHeight)
+        if bodyImage then
+            bodyImages[i] = bodyImage
+            print("Loaded " .. bodyNames[i] .. " body view")
+        else
+            print("  WARNING: Failed to convert " .. bodyNames[i] .. " body SVG: " .. (err or "Unknown error"))
+        end
+    end
+    
+    -- Create a single layer for all body views
+    local bodyLayer = sheetSprite:newLayer("Body")
+    
+    -- Create canvas images for all 12 frames
+    local bodyFrameImages = {}
+    for i = 1, 12 do
+        bodyFrameImages[i] = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+    end
+    
+    -- Layout specification:
+    -- Row 0 (y=0): x=0,64,128,192,256 - all use front view body
+    -- Row 1 (y=64): x=0,64,128,192,256 - all use front view body
+    -- Row 2 (y=128): x=0,64 - use front view body (only 2 columns)
+    -- Row 3 (y=192): x=0,64,128,192,256 - all use left view body
+    -- Row 4 (y=256): x=0,64,128,192,256 - all use right view body
+    -- Row 5 (y=320): x=0,64,128,192,256 - all use back view body
+    
+    local frontBody = bodyImages[1]  -- Front view
+    local leftBody = bodyImages[4]   -- Left view
+    local rightBody = bodyImages[5]  -- Right view
+    local backBody = bodyImages[6]   -- Back view
+    
+    if not frontBody or not leftBody or not rightBody or not backBody then
+        return nil, "Missing required body views (Front, Left, Right, Back)"
+    end
+    
+    -- Create offset versions of body images (up by 1 = y offset -1)
+    local frontBodyOffset = applyYOffsetToImage(frontBody, -1)
+    local leftBodyOffset = applyYOffsetToImage(leftBody, -1)
+    local rightBodyOffset = applyYOffsetToImage(rightBody, -1)
+    local backBodyOffset = applyYOffsetToImage(backBody, -1)
+    
+    -- Helper function to get the appropriate body image based on row
+    local function getBodyImageForRow(rowY, isOffset)
+        local bodyImage = nil
+        if rowY == 0 or rowY == 64 or rowY == 128 then
+            bodyImage = isOffset and frontBodyOffset or frontBody
+        elseif rowY == 192 then
+            bodyImage = isOffset and leftBodyOffset or leftBody
+        elseif rowY == 256 then
+            bodyImage = isOffset and rightBodyOffset or rightBody
+        elseif rowY == 320 then
+            bodyImage = isOffset and backBodyOffset or backBody
+        end
+        return bodyImage
+    end
+    
+    -- Define all row y positions
+    local rowYs = {0, 64, 128, 192, 256, 320}
+    
+    -- Frame 1: Build the frame
+    for _, rowY in ipairs(rowYs) do
+        local baseBody = getBodyImageForRow(rowY, false)
+        local offsetBody = getBodyImageForRow(rowY, true)
         
-        print("Processing " .. viewName .. " view...")
-        
-        -- Convert SVG string to Image
-        local baseImage, err = svgStringToImage(svgString, frameWidth, frameHeight)
-        if not baseImage then
-            print("  ERROR: Failed to convert SVG: " .. (err or "Unknown error"))
-            if originalActiveSprite then
-                app.activeSprite = originalActiveSprite
+        if baseBody and offsetBody then
+            -- Determine which columns to draw based on row
+            local columns = {}
+            if rowY == 128 then
+                -- Row 2: Only x=0,64
+                columns = {0, 64}
+            else
+                -- All other rows: x=0,64,128,192,256
+                columns = {0, 64, 128, 192, 256}
             end
-            return nil, "Failed to convert SVG for " .. viewName .. " view: " .. (err or "Unknown error")
+            
+            -- Draw images for all frames (base body stays same across all frames)
+            for frameIdx = 1, 12 do
+                for _, x in ipairs(columns) do
+                    if x == 64 then
+                        -- Column x=64: offset image (frames 1-2 only change, but we'll duplicate for all)
+                        if frameIdx <= 2 then
+                            bodyFrameImages[frameIdx]:drawImage(offsetBody, Point(x, rowY))
+                        else
+                            bodyFrameImages[frameIdx]:drawImage(offsetBody, Point(x, rowY))
+                        end
+                    else
+                        -- All other columns: base image (same in all frames)
+                        bodyFrameImages[frameIdx]:drawImage(baseBody, Point(x, rowY))
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Frame 2: x=0 duplicates x=64, all other columns same as Frame 1
+    for _, rowY in ipairs(rowYs) do
+        local baseBody = getBodyImageForRow(rowY, false)
+        local offsetBody = getBodyImageForRow(rowY, true)
+        
+        if baseBody and offsetBody then
+            -- Determine which columns to draw based on row
+            local columns = {}
+            if rowY == 128 then
+                -- Row 2: Only x=0,64
+                columns = {0, 64}
+            else
+                -- All other rows: x=0,64,128,192,256
+                columns = {0, 64, 128, 192, 256}
+            end
+            
+            -- Draw images for Frame 2 specifically
+            for _, x in ipairs(columns) do
+                if x == 0 then
+                    -- Column x=0: duplicate x=64 (offset)
+                    bodyFrameImages[2]:drawImage(offsetBody, Point(x, rowY))
+                elseif x == 64 then
+                    -- Column x=64: offset image (same as Frame 1)
+                    bodyFrameImages[2]:drawImage(offsetBody, Point(x, rowY))
+                else
+                    -- All other columns: base image (same as Frame 1)
+                    bodyFrameImages[2]:drawImage(baseBody, Point(x, rowY))
+                end
+            end
+            
+            -- For frames 3-12, duplicate frame 2's pattern (x=0 and x=64 both have offset)
+            for frameIdx = 3, 12 do
+                for _, x in ipairs(columns) do
+                    if x == 0 or x == 64 then
+                        bodyFrameImages[frameIdx]:drawImage(offsetBody, Point(x, rowY))
+                    else
+                        bodyFrameImages[frameIdx]:drawImage(baseBody, Point(x, rowY))
+                    end
+                end
+            end
+        end
+    end
+    
+    print("  Frame 1: Base images at x=0,128,192,256 | Offset images at x=64")
+    print("  Frame 2: Offset images at x=0,64 (x=0 duplicates x=64) | Base images at x=128,192,256")
+    print("  Frames 3-12: Same as Frame 2 pattern")
+    
+    -- Create cels for body layer (all 12 frames)
+    for frameIdx = 1, 12 do
+        sheetSprite:newCel(bodyLayer, frames[frameIdx], bodyFrameImages[frameIdx])
+    end
+    
+    -- Add take damage sequences to columns 5-7 (x=320, 384, 448)
+    if #takeDamageData.front >= 3 and #takeDamageData.left >= 3 and 
+       #takeDamageData.right >= 3 and #takeDamageData.back >= 3 then
+        
+        print("Adding take damage sequences...")
+        
+        -- Create take damage layer
+        local takeDamageLayer = sheetSprite:newLayer("Take Damage")
+        
+        -- Prepare images for all take damage views
+        local takeDamageImages = {
+            front = {},
+            left = {},
+            right = {},
+            back = {}
+        }
+        
+        for i = 1, 3 do
+            -- Front view
+            local img, err = svgStringToImage(takeDamageData.front[i], frameWidth, frameHeight)
+            if img then table.insert(takeDamageImages.front, img) end
+            
+            -- Left view
+            img, err = svgStringToImage(takeDamageData.left[i], frameWidth, frameHeight)
+            if img then table.insert(takeDamageImages.left, img) end
+            
+            -- Right view
+            img, err = svgStringToImage(takeDamageData.right[i], frameWidth, frameHeight)
+            if img then table.insert(takeDamageImages.right, img) end
+            
+            -- Back view
+            img, err = svgStringToImage(takeDamageData.back[i], frameWidth, frameHeight)
+            if img then table.insert(takeDamageImages.back, img) end
         end
         
-        -- Create layer for this view with descriptive label
-        local layerName = viewName .. " - Body"
-        local viewLayer = sheetSprite:newLayer(layerName)
+        -- Create canvas images for frames 1-12
+        local takeDamageFrameImages = {}
+        for frameIdx = 1, 12 do
+            takeDamageFrameImages[frameIdx] = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        end
         
-        -- Create canvas images for both frames
-        local frame1Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
-        local frame2Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        -- Columns 5-7: x=320, 384, 448
+        -- Row 2 (y=64): front view take damage frames 1, 2, 3
+        if #takeDamageImages.front >= 3 then
+            for col = 1, 3 do
+                local x = 320 + (col - 1) * 64  -- 320, 384, 448
+                local y = 64  -- Row 2
+                -- Add to all frames (static display)
+                for frameIdx = 1, 12 do
+                    takeDamageFrameImages[frameIdx]:drawImage(takeDamageImages.front[col], Point(x, y))
+                end
+            end
+        end
         
-        -- Calculate positions
-        local yPos = viewIndex * frameHeight
-        local leftColX = 0
-        local rightColX = 64
+        -- Row 3 (y=128): front view take damage frames 1, 2, 3 (duplicate of row 2)
+        if #takeDamageImages.front >= 3 then
+            for col = 1, 3 do
+                local x = 320 + (col - 1) * 64  -- 320, 384, 448
+                local y = 128  -- Row 3
+                -- Add to all frames (static display)
+                for frameIdx = 1, 12 do
+                    takeDamageFrameImages[frameIdx]:drawImage(takeDamageImages.front[col], Point(x, y))
+                end
+            end
+        end
         
-        -- Create offset version once (used in both frames)
-        local offsetImage = applyYOffsetToImage(baseImage, -1)
+        -- Row 4 (y=192): left view take damage frames 1, 2, 3
+        if #takeDamageImages.left >= 3 then
+            for col = 1, 3 do
+                local x = 320 + (col - 1) * 64
+                local y = 192
+                for frameIdx = 1, 12 do
+                    takeDamageFrameImages[frameIdx]:drawImage(takeDamageImages.left[col], Point(x, y))
+                end
+            end
+        end
         
-        -- Frame 1: Left column = base views, Right column = offset views
-        frame1Image:drawImage(baseImage, Point(leftColX, yPos))
-        frame1Image:drawImage(offsetImage, Point(rightColX, yPos))
+        -- Row 5 (y=256): right view take damage frames 1, 2, 3
+        if #takeDamageImages.right >= 3 then
+            for col = 1, 3 do
+                local x = 320 + (col - 1) * 64
+                local y = 256
+                for frameIdx = 1, 12 do
+                    takeDamageFrameImages[frameIdx]:drawImage(takeDamageImages.right[col], Point(x, y))
+                end
+            end
+        end
         
-        -- Frame 2: Left column = offset views, Right column = offset views (same as right of frame 1)
-        frame2Image:drawImage(offsetImage, Point(leftColX, yPos))
-        frame2Image:drawImage(offsetImage, Point(rightColX, yPos))
+        -- Row 6 (y=320): back view take damage frames 1, 2, 3
+        if #takeDamageImages.back >= 3 then
+            for col = 1, 3 do
+                local x = 320 + (col - 1) * 64
+                local y = 320
+                for frameIdx = 1, 12 do
+                    takeDamageFrameImages[frameIdx]:drawImage(takeDamageImages.back[col], Point(x, y))
+                end
+            end
+        end
         
-        -- Create cels for this view layer
-        sheetSprite:newCel(viewLayer, frame1, frame1Image)
-        sheetSprite:newCel(viewLayer, frame2, frame2Image)
+        -- Column 8 (x=512): Take damage animation
+        local x = 512
         
-        print("  Created layer: " .. viewName)
-        print("  Frame 1: base at (" .. leftColX .. ", " .. yPos .. "), offset at (" .. rightColX .. ", " .. yPos .. ")")
-        print("  Frame 2: offset at (" .. leftColX .. ", " .. yPos .. "), offset at (" .. rightColX .. ", " .. yPos .. ")")
+        -- Row 2 (y=64): Front view take damage animation (frames 3-5 show front view frames 1-3)
+        if #takeDamageImages.front >= 3 then
+            local y = 64  -- Row 2
+            -- Frame 3 shows take damage frame 1
+            takeDamageFrameImages[3]:drawImage(takeDamageImages.front[1], Point(x, y))
+            -- Frame 4 shows take damage frame 2
+            takeDamageFrameImages[4]:drawImage(takeDamageImages.front[2], Point(x, y))
+            -- Frame 5 shows take damage frame 3
+            takeDamageFrameImages[5]:drawImage(takeDamageImages.front[3], Point(x, y))
+            -- Other frames can show frame 3 or remain empty
+            for frameIdx = 6, 12 do
+                takeDamageFrameImages[frameIdx]:drawImage(takeDamageImages.front[3], Point(x, y))
+            end
+        end
+        
+        -- Row 3 (y=128): Front view take damage animation (duplicate of row 2)
+        if #takeDamageImages.front >= 3 then
+            local y = 128  -- Row 3
+            -- Frame 3 shows take damage frame 1
+            takeDamageFrameImages[3]:drawImage(takeDamageImages.front[1], Point(x, y))
+            -- Frame 4 shows take damage frame 2
+            takeDamageFrameImages[4]:drawImage(takeDamageImages.front[2], Point(x, y))
+            -- Frame 5 shows take damage frame 3
+            takeDamageFrameImages[5]:drawImage(takeDamageImages.front[3], Point(x, y))
+            -- Other frames can show frame 3 or remain empty
+            for frameIdx = 6, 12 do
+                takeDamageFrameImages[frameIdx]:drawImage(takeDamageImages.front[3], Point(x, y))
+            end
+        end
+        
+        -- Row 4 (y=192): Left view take damage animation (frames 3-5 show left view frames 1-3)
+        if #takeDamageImages.left >= 3 then
+            local y = 192
+            -- Frame 3 shows take damage frame 1
+            takeDamageFrameImages[3]:drawImage(takeDamageImages.left[1], Point(x, y))
+            -- Frame 4 shows take damage frame 2
+            takeDamageFrameImages[4]:drawImage(takeDamageImages.left[2], Point(x, y))
+            -- Frame 5 shows take damage frame 3
+            takeDamageFrameImages[5]:drawImage(takeDamageImages.left[3], Point(x, y))
+            -- Other frames can show frame 3 or remain empty
+            for frameIdx = 6, 12 do
+                takeDamageFrameImages[frameIdx]:drawImage(takeDamageImages.left[3], Point(x, y))
+            end
+        end
+        
+        -- Row 5 (y=256): Right view take damage animation (frames 3-5 show right view frames 1-3)
+        if #takeDamageImages.right >= 3 then
+            local y = 256
+            -- Frame 3 shows take damage frame 1
+            takeDamageFrameImages[3]:drawImage(takeDamageImages.right[1], Point(x, y))
+            -- Frame 4 shows take damage frame 2
+            takeDamageFrameImages[4]:drawImage(takeDamageImages.right[2], Point(x, y))
+            -- Frame 5 shows take damage frame 3
+            takeDamageFrameImages[5]:drawImage(takeDamageImages.right[3], Point(x, y))
+            -- Other frames can show frame 3 or remain empty
+            for frameIdx = 6, 12 do
+                takeDamageFrameImages[frameIdx]:drawImage(takeDamageImages.right[3], Point(x, y))
+            end
+        end
+        
+        -- Row 6 (y=320): Back view take damage animation (frames 3-5 show back view frames 1-3)
+        if #takeDamageImages.back >= 3 then
+            local y = 320
+            -- Frame 3 shows take damage frame 1
+            takeDamageFrameImages[3]:drawImage(takeDamageImages.back[1], Point(x, y))
+            -- Frame 4 shows take damage frame 2
+            takeDamageFrameImages[4]:drawImage(takeDamageImages.back[2], Point(x, y))
+            -- Frame 5 shows take damage frame 3
+            takeDamageFrameImages[5]:drawImage(takeDamageImages.back[3], Point(x, y))
+            -- Other frames can show frame 3 or remain empty
+            for frameIdx = 6, 12 do
+                takeDamageFrameImages[frameIdx]:drawImage(takeDamageImages.back[3], Point(x, y))
+            end
+        end
+        
+        -- Create cels for all frames
+        for frameIdx = 1, 12 do
+            sheetSprite:newCel(takeDamageLayer, frames[frameIdx], takeDamageFrameImages[frameIdx])
+        end
+        
+        print("  Created take damage layer")
+    end
+    
+    -- Add death sequence to columns 9-15 (x=576, 640, 704, 768, 832, 896, 960)
+    if #deathArray >= 7 then
+        print("Adding death sequence...")
+        
+        -- Create death layer
+        local deathLayer = sheetSprite:newLayer("Death")
+        
+        -- Convert death SVGs to images
+        local deathImages = {}
+        for i = 1, 7 do
+            local img, err = svgStringToImage(deathArray[i], frameWidth, frameHeight)
+            if img then
+                table.insert(deathImages, img)
+            else
+                print("  WARNING: Failed to convert death SVG " .. i .. ": " .. (err or "Unknown error"))
+            end
+        end
+        
+        -- Create canvas images for frames 1-12
+        local deathFrameImages = {}
+        for frameIdx = 1, 12 do
+            deathFrameImages[frameIdx] = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        end
+        
+        -- Columns 9-15: x=576, 640, 704, 768, 832, 896, 960
+        -- Row 1 (y=0): all 7 death SVGs (static display in all frames)
+        if #deathImages >= 7 then
+            for col = 1, 7 do
+                local x = 576 + (col - 1) * 64  -- 576, 640, 704, 768, 832, 896, 960
+                local y = 0
+                -- Add to all frames (static display)
+                for frameIdx = 1, 12 do
+                    deathFrameImages[frameIdx]:drawImage(deathImages[col], Point(x, y))
+                end
+            end
+        end
+        
+        -- Column 16 (x=1024): Death animation (frames 6-12 show death frames 1-7)
+        if #deathImages >= 7 then
+            local x = 1024
+            local y = 0
+            -- Frame 6 shows death frame 1
+            deathFrameImages[6]:drawImage(deathImages[1], Point(x, y))
+            -- Frame 7 shows death frame 2
+            deathFrameImages[7]:drawImage(deathImages[2], Point(x, y))
+            -- Frame 8 shows death frame 3
+            deathFrameImages[8]:drawImage(deathImages[3], Point(x, y))
+            -- Frame 9 shows death frame 4
+            deathFrameImages[9]:drawImage(deathImages[4], Point(x, y))
+            -- Frame 10 shows death frame 5
+            deathFrameImages[10]:drawImage(deathImages[5], Point(x, y))
+            -- Frame 11 shows death frame 6
+            deathFrameImages[11]:drawImage(deathImages[6], Point(x, y))
+            -- Frame 12 shows death frame 7
+            deathFrameImages[12]:drawImage(deathImages[7], Point(x, y))
+        end
+        
+        -- Create cels for all frames
+        for frameIdx = 1, 12 do
+            sheetSprite:newCel(deathLayer, frames[frameIdx], deathFrameImages[frameIdx])
+        end
+        
+        print("  Created death layer with " .. #deathImages .. " death frames")
     end
     
     print("SUCCESS: Body sprite sheet created!")
     print("Dimensions: " .. sheetWidth .. "x" .. sheetHeight)
-    print("Frames: 2")
+    print("Frames: 12")
     
     -- Return the sprite
     app.activeSprite = sheetSprite
@@ -798,8 +1546,28 @@ function SpriteSheetGenerator.generateHandsSpriteSheet(collateral, jsonPath, ass
     
     print("Loaded " .. #handsArray .. " hands views from JSON")
     
-    -- Create sprite: 128x384 (2 columns × 6 rows of 64x64 cells)
-    local sheetWidth = 128
+    -- Parse weapon array
+    local weaponArray, err = parseWeaponJson(jsonPath)
+    if not weaponArray then
+        print("WARNING: Could not parse weapon array: " .. (err or "Unknown error"))
+        weaponArray = {}
+    else
+        print("Loaded " .. #weaponArray .. " weapon views from JSON")
+    end
+    
+    -- Parse hand takeDamage arrays
+    local handTakeDamageData, err = parseHandTakeDamageJson(jsonPath)
+    if not handTakeDamageData then
+        print("WARNING: Could not parse hand takeDamage arrays: " .. (err or "Unknown error"))
+        handTakeDamageData = {frontDown = {}, frontUp = {}, left = {}, right = {}}
+    else
+        print("Loaded hand takeDamage arrays: frontDown=" .. #handTakeDamageData.frontDown .. ", frontUp=" .. #handTakeDamageData.frontUp .. 
+              ", left=" .. #handTakeDamageData.left .. ", right=" .. #handTakeDamageData.right)
+    end
+    
+    -- Create sprite: 576x384 (9 columns × 6 rows of 64x64 cells)
+    -- Original 5 columns (0-256) + 4 new columns (320-512) = 576px
+    local sheetWidth = 576
     local sheetHeight = 384
     local frameWidth = 64
     local frameHeight = 64
@@ -824,21 +1592,33 @@ function SpriteSheetGenerator.generateHandsSpriteSheet(collateral, jsonPath, ass
         end
     end)
     
-    -- Get frame 1 and create frame 2
+    -- Get frame 1 and create frames 2 and 3
     local frame1 = sheetSprite.frames[1]
     local frame2 = sheetSprite:newFrame(2)
+    local frame3 = sheetSprite:newFrame(3)
     
-    if not frame1 or not frame2 then
+    if not frame1 or not frame2 or not frame3 then
         if originalActiveSprite then
             app.activeSprite = originalActiveSprite
         end
         return nil, "Failed to create frames"
     end
     
-    -- Process each view (front, front up, front down closed, left, right, back) - create separate layer for each
-    local viewNames = {"Front", "Front - Up", "Front - Down Closed", "Left", "Right", "Back"}
+    -- Process each view: hands array mapping:
+    -- Index 0: handsDownClosed → Front
+    -- Index 1: handsDownOpen → Front - Down Open (and also used for Back)
+    -- Index 2: handsUp → Front - Up
+    -- Index 3: Left
+    -- Index 4: Right
+    -- Index 5: Back (reuses index 1 - handsDownOpen)
+    local viewNames = {"Front", "Front - Down Open", "Front - Up", "Left", "Right", "Back"}
     for viewIndex = 0, 5 do
-        local svgString = handsArray[viewIndex + 1]  -- Lua is 1-indexed
+        local arrayIndex = viewIndex + 1  -- Lua is 1-indexed
+        -- For back view (index 5), reuse Front - Down Open (array index 2, which is handsArray[2])
+        if viewIndex == 5 then
+            arrayIndex = 2  -- Use handsDownOpen for back
+        end
+        local svgString = handsArray[arrayIndex]
         local viewName = viewNames[viewIndex + 1]
         
         print("Processing " .. viewName .. " view...")
@@ -857,16 +1637,17 @@ function SpriteSheetGenerator.generateHandsSpriteSheet(collateral, jsonPath, ass
         local layerName = viewName .. " - Hands"
         local viewLayer = sheetSprite:newLayer(layerName)
         
-        -- Create canvas images for both frames
+        -- Create canvas images for all 3 frames
         local frame1Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
         local frame2Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        local frame3Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
         
-        -- Calculate positions
+        -- Calculate positions (columns 0 and 1 for hands)
         local yPos = viewIndex * frameHeight
         local leftColX = 0
         local rightColX = 64
         
-        -- Create offset version once (used in both frames)
+        -- Create offset version once (used in multiple frames)
         local offsetImage = applyYOffsetToImage(baseImage, -1)
         
         -- Frame 1: Left column = base views, Right column = offset views
@@ -877,18 +1658,276 @@ function SpriteSheetGenerator.generateHandsSpriteSheet(collateral, jsonPath, ass
         frame2Image:drawImage(offsetImage, Point(leftColX, yPos))
         frame2Image:drawImage(offsetImage, Point(rightColX, yPos))
         
+        -- Frame 3: Same as frame 1 for existing hands layers
+        frame3Image:drawImage(baseImage, Point(leftColX, yPos))
+        frame3Image:drawImage(offsetImage, Point(rightColX, yPos))
+        
         -- Create cels for this view layer
         sheetSprite:newCel(viewLayer, frame1, frame1Image)
         sheetSprite:newCel(viewLayer, frame2, frame2Image)
+        sheetSprite:newCel(viewLayer, frame3, frame3Image)
         
         print("  Created layer: " .. layerName)
         print("  Frame 1: base at (" .. leftColX .. ", " .. yPos .. "), offset at (" .. rightColX .. ", " .. yPos .. ")")
         print("  Frame 2: offset at (" .. leftColX .. ", " .. yPos .. "), offset at (" .. rightColX .. ", " .. yPos .. ")")
     end
     
+    -- Process weapon views if available
+    -- Specific positions for each weapon SVG index:
+    -- Index 0: x=128, y=0
+    -- Index 1: x=192, y=0
+    -- Index 2: x=128, y=64
+    -- Index 3: x=192, y=64
+    -- Index 4: x=128, y=192
+    -- Index 5: x=192, y=192
+    -- Index 6: x=128, y=256
+    -- Index 7: x=192, y=256
+    -- Index 8: x=128, y=320
+    -- Index 9: x=192, y=320
+    -- Index 10: (not specified, will skip)
+    if #weaponArray >= 10 then
+        print("Processing weapon views...")
+        
+        -- Create a single layer for all weapon views
+        local weaponLayer = sheetSprite:newLayer("Weapon - useItem/weapon")
+        
+        -- Create canvas images for all 3 frames
+        local frame1Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        local frame2Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        local frame3Image = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        
+        -- Define positions for each weapon index (0-indexed array, but Lua uses 1-indexed)
+        local weaponPositions = {
+            {x = 128, y = 0},    -- Index 0
+            {x = 192, y = 0},    -- Index 1
+            {x = 128, y = 64},   -- Index 2
+            {x = 192, y = 64},   -- Index 3
+            {x = 128, y = 192},  -- Index 4
+            {x = 192, y = 192},  -- Index 5
+            {x = 128, y = 256},  -- Index 6
+            {x = 192, y = 256},  -- Index 7
+            {x = 128, y = 320},  -- Index 8
+            {x = 192, y = 320},  -- Index 9
+        }
+        
+        -- First pass: draw weapons at their original positions
+        for i = 1, math.min(#weaponArray, #weaponPositions) do
+            local pos = weaponPositions[i]
+            local svgString = weaponArray[i]
+            
+            local weaponImage, err = svgStringToImage(svgString, frameWidth, frameHeight)
+            if weaponImage then
+                -- For x=128 and x=192: all frames use base image (no offset)
+                if pos.x == 128 or pos.x == 192 then
+                    -- Frame 1: base view
+                    frame1Image:drawImage(weaponImage, Point(pos.x, pos.y))
+                    -- Frame 2: same base view (no offset)
+                    frame2Image:drawImage(weaponImage, Point(pos.x, pos.y))
+                    -- Frame 3: same base view (no offset)
+                    frame3Image:drawImage(weaponImage, Point(pos.x, pos.y))
+                    
+                    print("  Added weapon index " .. (i - 1) .. " at (" .. pos.x .. ", " .. pos.y .. ") (no offset, same in all frames)")
+                else
+                    print("  WARNING: Unexpected x position " .. pos.x .. " for weapon index " .. (i - 1))
+                end
+            else
+                print("  WARNING: Failed to convert weapon SVG index " .. (i - 1) .. ": " .. (err or "Unknown error"))
+            end
+        end
+        
+        -- Second pass: duplicate to x=256 column
+        for i = 1, math.min(#weaponArray, #weaponPositions) do
+            local pos = weaponPositions[i]
+            local svgString = weaponArray[i]
+            
+            local weaponImage, err = svgStringToImage(svgString, frameWidth, frameHeight)
+            if weaponImage then
+                -- Duplicate x=128 positions to x=256 in Frame 1 (mirror x=128 column)
+                if pos.x == 128 and (pos.y == 0 or pos.y == 64 or pos.y == 192 or pos.y == 256 or pos.y == 320) then
+                    -- Frame 1: duplicate base view from x=128 to x=256
+                    frame1Image:drawImage(weaponImage, Point(256, pos.y))
+                    print("  Duplicated weapon index " .. (i - 1) .. " from (128, " .. pos.y .. ") to (256, " .. pos.y .. ") in Frame 1")
+                end
+                
+                -- Duplicate x=192 positions to x=256 in Frame 2 (mirror x=192 column)
+                if pos.x == 192 and (pos.y == 0 or pos.y == 64 or pos.y == 128 or pos.y == 192 or pos.y == 256 or pos.y == 320) then
+                    -- Frame 2: duplicate base view from x=192 to x=256
+                    frame2Image:drawImage(weaponImage, Point(256, pos.y))
+                    print("  Duplicated weapon index " .. (i - 1) .. " from (192, " .. pos.y .. ") to (256, " .. pos.y .. ") in Frame 2")
+                end
+            end
+        end
+        
+        -- Frame 3: same as Frame 1 (duplicate x=128 to x=256)
+        for i = 1, math.min(#weaponArray, #weaponPositions) do
+            local pos = weaponPositions[i]
+            local svgString = weaponArray[i]
+            
+            local weaponImage, err = svgStringToImage(svgString, frameWidth, frameHeight)
+            if weaponImage then
+                -- Duplicate x=128 positions to x=256 in Frame 3 (same as Frame 1)
+                if pos.x == 128 and (pos.y == 0 or pos.y == 64 or pos.y == 192 or pos.y == 256 or pos.y == 320) then
+                    -- Frame 3: duplicate base view from x=128 to x=256 (same as Frame 1)
+                    frame3Image:drawImage(weaponImage, Point(256, pos.y))
+                end
+                -- Also copy base positions
+                if pos.x == 128 or pos.x == 192 then
+                    frame3Image:drawImage(weaponImage, Point(pos.x, pos.y))
+                end
+            end
+        end
+        
+        -- Create cels for weapon layer
+        sheetSprite:newCel(weaponLayer, frame1, frame1Image)
+        sheetSprite:newCel(weaponLayer, frame2, frame2Image)
+        sheetSprite:newCel(weaponLayer, frame3, frame3Image)
+        
+        print("  Created weapon layer with " .. math.min(#weaponArray, #weaponPositions) .. " weapons")
+    end
+    
+    -- Add hand take damage sequences to columns 6-8 (x=320, 384, 448)
+    if #handTakeDamageData.frontDown >= 3 and #handTakeDamageData.frontUp >= 3 and 
+       #handTakeDamageData.left >= 3 and #handTakeDamageData.right >= 3 then
+        
+        print("Adding hand take damage sequences...")
+        
+        -- Create hand take damage layer
+        local handTakeDamageLayer = sheetSprite:newLayer("Hands - Take Damage")
+        
+        -- Prepare images for all hand take damage views
+        local handTakeDamageImages = {
+            frontDown = {},
+            frontUp = {},
+            left = {},
+            right = {}
+        }
+        
+        for i = 1, 3 do
+            -- Front Down view
+            local img, err = svgStringToImage(handTakeDamageData.frontDown[i], frameWidth, frameHeight)
+            if img then table.insert(handTakeDamageImages.frontDown, img) end
+            
+            -- Front Up view
+            img, err = svgStringToImage(handTakeDamageData.frontUp[i], frameWidth, frameHeight)
+            if img then table.insert(handTakeDamageImages.frontUp, img) end
+            
+            -- Left view
+            img, err = svgStringToImage(handTakeDamageData.left[i], frameWidth, frameHeight)
+            if img then table.insert(handTakeDamageImages.left, img) end
+            
+            -- Right view
+            img, err = svgStringToImage(handTakeDamageData.right[i], frameWidth, frameHeight)
+            if img then table.insert(handTakeDamageImages.right, img) end
+        end
+        
+        -- Create canvas images for all 3 frames
+        local handTakeDamageFrameImages = {}
+        for frameIdx = 1, 3 do
+            handTakeDamageFrameImages[frameIdx] = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        end
+        
+        -- Columns 6-8: x=320, 384, 448 (static display - same in all frames)
+        -- Row 2 (y=64): Front Down view take damage frames 1, 2, 3
+        if #handTakeDamageImages.frontDown >= 3 then
+            for col = 1, 3 do
+                local x = 320 + (col - 1) * 64  -- 320, 384, 448
+                local y = 64  -- Row 2
+                for frameIdx = 1, 3 do
+                    handTakeDamageFrameImages[frameIdx]:drawImage(handTakeDamageImages.frontDown[col], Point(x, y))
+                end
+            end
+        end
+        
+        -- Row 3 (y=128): Front Up view take damage frames 1, 2, 3
+        if #handTakeDamageImages.frontUp >= 3 then
+            for col = 1, 3 do
+                local x = 320 + (col - 1) * 64
+                local y = 128  -- Row 3
+                for frameIdx = 1, 3 do
+                    handTakeDamageFrameImages[frameIdx]:drawImage(handTakeDamageImages.frontUp[col], Point(x, y))
+                end
+            end
+        end
+        
+        -- Row 4 (y=192): Left view take damage frames 1, 2, 3
+        if #handTakeDamageImages.left >= 3 then
+            for col = 1, 3 do
+                local x = 320 + (col - 1) * 64
+                local y = 192  -- Row 4
+                for frameIdx = 1, 3 do
+                    handTakeDamageFrameImages[frameIdx]:drawImage(handTakeDamageImages.left[col], Point(x, y))
+                end
+            end
+        end
+        
+        -- Row 5 (y=256): Right view take damage frames 1, 2, 3
+        if #handTakeDamageImages.right >= 3 then
+            for col = 1, 3 do
+                local x = 320 + (col - 1) * 64
+                local y = 256  -- Row 5
+                for frameIdx = 1, 3 do
+                    handTakeDamageFrameImages[frameIdx]:drawImage(handTakeDamageImages.right[col], Point(x, y))
+                end
+            end
+        end
+        
+        -- Column 9 (x=512): Animation column
+        -- Row 2 (y=64): Front Down animation (frames 1-3 show frontDown frames 1-3)
+        if #handTakeDamageImages.frontDown >= 3 then
+            local x = 512
+            local y = 64
+            handTakeDamageFrameImages[1]:drawImage(handTakeDamageImages.frontDown[1], Point(x, y))
+            handTakeDamageFrameImages[2]:drawImage(handTakeDamageImages.frontDown[2], Point(x, y))
+            handTakeDamageFrameImages[3]:drawImage(handTakeDamageImages.frontDown[3], Point(x, y))
+        end
+        
+        -- Row 3 (y=128): Front Up animation (frames 1-3 show frontUp frames 1-3)
+        if #handTakeDamageImages.frontUp >= 3 then
+            local x = 512
+            local y = 128
+            handTakeDamageFrameImages[1]:drawImage(handTakeDamageImages.frontUp[1], Point(x, y))
+            handTakeDamageFrameImages[2]:drawImage(handTakeDamageImages.frontUp[2], Point(x, y))
+            handTakeDamageFrameImages[3]:drawImage(handTakeDamageImages.frontUp[3], Point(x, y))
+        end
+        
+        -- Row 4 (y=192): Left animation (frames 1-3 show left frames 1-3)
+        if #handTakeDamageImages.left >= 3 then
+            local x = 512
+            local y = 192
+            handTakeDamageFrameImages[1]:drawImage(handTakeDamageImages.left[1], Point(x, y))
+            handTakeDamageFrameImages[2]:drawImage(handTakeDamageImages.left[2], Point(x, y))
+            handTakeDamageFrameImages[3]:drawImage(handTakeDamageImages.left[3], Point(x, y))
+        end
+        
+        -- Row 5 (y=256): Right animation (frames 1-3 show right frames 1-3)
+        if #handTakeDamageImages.right >= 3 then
+            local x = 512
+            local y = 256
+            handTakeDamageFrameImages[1]:drawImage(handTakeDamageImages.right[1], Point(x, y))
+            handTakeDamageFrameImages[2]:drawImage(handTakeDamageImages.right[2], Point(x, y))
+            handTakeDamageFrameImages[3]:drawImage(handTakeDamageImages.right[3], Point(x, y))
+        end
+        
+        -- Row 6 (y=320): Duplicate row 2 (frontDown animation) for back view
+        if #handTakeDamageImages.frontDown >= 3 then
+            local x = 512
+            local y = 320
+            handTakeDamageFrameImages[1]:drawImage(handTakeDamageImages.frontDown[1], Point(x, y))
+            handTakeDamageFrameImages[2]:drawImage(handTakeDamageImages.frontDown[2], Point(x, y))
+            handTakeDamageFrameImages[3]:drawImage(handTakeDamageImages.frontDown[3], Point(x, y))
+        end
+        
+        -- Create cels for all 3 frames
+        sheetSprite:newCel(handTakeDamageLayer, frame1, handTakeDamageFrameImages[1])
+        sheetSprite:newCel(handTakeDamageLayer, frame2, handTakeDamageFrameImages[2])
+        sheetSprite:newCel(handTakeDamageLayer, frame3, handTakeDamageFrameImages[3])
+        
+        print("  Created hand take damage layer")
+    end
+    
     print("SUCCESS: Hands sprite sheet created!")
     print("Dimensions: " .. sheetWidth .. "x" .. sheetHeight)
-    print("Frames: 2")
+    print("Frames: 3")
     
     -- Return the sprite
     app.activeSprite = sheetSprite
