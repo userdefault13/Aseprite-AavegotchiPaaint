@@ -1018,6 +1018,164 @@ local function parseHandTakeDamageJson(jsonPath)
     return handTakeDamageData, nil
 end
 
+-- Parse JSON file to extract collateral array
+local function parseCollateralJson(jsonPath)
+    local file = io.open(jsonPath, "r")
+    if not file then
+        return nil, "Failed to open JSON file: " .. jsonPath
+    end
+    
+    local jsonContent = file:read("*all")
+    file:close()
+    
+    if not jsonContent or jsonContent == "" then
+        return nil, "JSON file is empty"
+    end
+    
+    -- Simple parser to extract collateral array
+    local collateralArray = {}
+    local collateralStart = jsonContent:find('"collateral"%s*:%s*%[')
+    if not collateralStart then
+        return nil, "Could not find 'collateral' array in JSON"
+    end
+    
+    local arrayStart = jsonContent:find('%[', collateralStart)
+    local inString = false
+    local escapeNext = false
+    local currentString = ""
+    
+    for i = arrayStart + 1, #jsonContent do
+        local char = jsonContent:sub(i, i)
+        
+        if escapeNext then
+            if inString then
+                -- Handle escape sequences
+                if char == '"' then
+                    currentString = currentString .. '"'
+                elseif char == '\\' then
+                    currentString = currentString .. '\\'
+                elseif char == 'n' then
+                    currentString = currentString .. '\n'
+                elseif char == 't' then
+                    currentString = currentString .. '\t'
+                else
+                    currentString = currentString .. char
+                end
+            end
+            escapeNext = false
+        elseif char == '\\' then
+            escapeNext = true
+        elseif char == '"' then
+            if inString then
+                -- End of string
+                table.insert(collateralArray, currentString)
+                currentString = ""
+                inString = false
+            else
+                -- Start of string
+                inString = true
+            end
+        elseif inString then
+            currentString = currentString .. char
+        elseif char == ']' and not inString then
+            break
+        end
+    end
+    
+    if #collateralArray < 3 then
+        return nil, "Expected at least 3 collateral views (front, left, right), found " .. #collateralArray
+    end
+    
+    return collateralArray, nil
+end
+
+-- Parse JSON file to extract mouth arrays
+local function parseMouthJson(jsonPath)
+    local file = io.open(jsonPath, "r")
+    if not file then
+        return nil, "Failed to open JSON file: " .. jsonPath
+    end
+    
+    local jsonContent = file:read("*all")
+    file:close()
+    
+    if not jsonContent or jsonContent == "" then
+        return nil, "JSON file is empty"
+    end
+    
+    local mouths = {
+        happy = nil,
+        surprised = nil,
+        sad = nil
+    }
+    
+    -- Extract mouth_happy
+    local happyStart = jsonContent:find('"mouth_happy"%s*:%s*%[')
+    if happyStart then
+        local arrayStart = jsonContent:find('%[', happyStart)
+        local svgStart = jsonContent:find('"', arrayStart)
+        if svgStart then
+            local svgEnd = jsonContent:find('"', svgStart + 1)
+            while jsonContent:sub(svgEnd - 1, svgEnd - 1) == '\\' do
+                svgEnd = jsonContent:find('"', svgEnd + 1)
+            end
+            if svgEnd then
+                local svgContent = jsonContent:sub(svgStart + 1, svgEnd - 1)
+                svgContent = svgContent:gsub('\\"', '"')
+                svgContent = svgContent:gsub('\\\\', '\\')
+                svgContent = svgContent:gsub('\\n', '\n')
+                mouths.happy = svgContent
+            end
+        end
+    end
+    
+    -- Extract mouth_surprised
+    local surprisedStart = jsonContent:find('"mouth_surprised"%s*:%s*%[')
+    if surprisedStart then
+        local arrayStart = jsonContent:find('%[', surprisedStart)
+        local svgStart = jsonContent:find('"', arrayStart)
+        if svgStart then
+            local svgEnd = jsonContent:find('"', svgStart + 1)
+            while jsonContent:sub(svgEnd - 1, svgEnd - 1) == '\\' do
+                svgEnd = jsonContent:find('"', svgEnd + 1)
+            end
+            if svgEnd then
+                local svgContent = jsonContent:sub(svgStart + 1, svgEnd - 1)
+                svgContent = svgContent:gsub('\\"', '"')
+                svgContent = svgContent:gsub('\\\\', '\\')
+                svgContent = svgContent:gsub('\\n', '\n')
+                mouths.surprised = svgContent
+            end
+        end
+    end
+    
+    -- Extract mouth_sad
+    local sadStart = jsonContent:find('"mouth_sad"%s*:%s*%[')
+    if sadStart then
+        local arrayStart = jsonContent:find('%[', sadStart)
+        local svgStart = jsonContent:find('"', arrayStart)
+        if svgStart then
+            local svgEnd = jsonContent:find('"', svgStart + 1)
+            while jsonContent:sub(svgEnd - 1, svgEnd - 1) == '\\' do
+                svgEnd = jsonContent:find('"', svgEnd + 1)
+            end
+            if svgEnd then
+                local svgContent = jsonContent:sub(svgStart + 1, svgEnd - 1)
+                svgContent = svgContent:gsub('\\"', '"')
+                svgContent = svgContent:gsub('\\\\', '\\')
+                svgContent = svgContent:gsub('\\n', '\n')
+                mouths.sad = svgContent
+            end
+        end
+    end
+    
+    if not mouths.happy or not mouths.surprised or not mouths.sad then
+        return nil, "Could not find all required mouth SVGs (happy, surprised, sad)"
+    end
+    
+    return mouths, nil
+end
+
 -- Generate body spritesheet from JSON file
 function SpriteSheetGenerator.generateBodySpriteSheet(collateral, jsonPath, assetsPath)
     print("=== Body Sprite Sheet Generator ===")
@@ -1190,15 +1348,15 @@ function SpriteSheetGenerator.generateBodySpriteSheet(collateral, jsonPath, asse
             end
             
             -- Draw images for all frames (base body stays same across all frames)
+            -- Note: Skip x=0 for frame 2, as it will be handled separately with offset
             for frameIdx = 1, 12 do
                 for _, x in ipairs(columns) do
                     if x == 64 then
-                        -- Column x=64: offset image (frames 1-2 only change, but we'll duplicate for all)
-                        if frameIdx <= 2 then
-                            bodyFrameImages[frameIdx]:drawImage(offsetBody, Point(x, rowY))
-                        else
-                            bodyFrameImages[frameIdx]:drawImage(offsetBody, Point(x, rowY))
-                        end
+                        -- Column x=64: offset image (all frames)
+                        bodyFrameImages[frameIdx]:drawImage(offsetBody, Point(x, rowY))
+                    elseif x == 0 and frameIdx == 2 then
+                        -- Column x=0 for frame 2: skip here, will be handled in next section
+                        -- Do nothing
                     else
                         -- All other columns: base image (same in all frames)
                         bodyFrameImages[frameIdx]:drawImage(baseBody, Point(x, rowY))
@@ -1225,35 +1383,23 @@ function SpriteSheetGenerator.generateBodySpriteSheet(collateral, jsonPath, asse
             end
             
             -- Draw images for Frame 2 specifically
+            -- Only need to draw x=0 with offset (x=64 and others already drawn correctly in first loop)
             for _, x in ipairs(columns) do
                 if x == 0 then
-                    -- Column x=0: duplicate x=64 (offset)
+                    -- Column x=0: duplicate x=64 (offset) - this is the only change for frame 2
                     bodyFrameImages[2]:drawImage(offsetBody, Point(x, rowY))
-                elseif x == 64 then
-                    -- Column x=64: offset image (same as Frame 1)
-                    bodyFrameImages[2]:drawImage(offsetBody, Point(x, rowY))
-                else
-                    -- All other columns: base image (same as Frame 1)
-                    bodyFrameImages[2]:drawImage(baseBody, Point(x, rowY))
                 end
+                -- x=64 and other columns already drawn correctly in first loop, no need to redraw
             end
             
-            -- For frames 3-12, duplicate frame 2's pattern (x=0 and x=64 both have offset)
-            for frameIdx = 3, 12 do
-                for _, x in ipairs(columns) do
-                    if x == 0 or x == 64 then
-                        bodyFrameImages[frameIdx]:drawImage(offsetBody, Point(x, rowY))
-                    else
-                        bodyFrameImages[frameIdx]:drawImage(baseBody, Point(x, rowY))
-                    end
-                end
-            end
+            -- Frames 3-12: Already drawn correctly in first loop (same as frame 1 pattern)
+            -- x=0 = base, x=64 = offset, others = base
         end
     end
     
     print("  Frame 1: Base images at x=0,128,192,256 | Offset images at x=64")
     print("  Frame 2: Offset images at x=0,64 (x=0 duplicates x=64) | Base images at x=128,192,256")
-    print("  Frames 3-12: Same as Frame 2 pattern")
+    print("  Frames 3-12: Same as Frame 1 pattern (reverted)")
     
     -- Create cels for body layer (all 12 frames)
     for frameIdx = 1, 12 do
@@ -1926,6 +2072,506 @@ function SpriteSheetGenerator.generateHandsSpriteSheet(collateral, jsonPath, ass
     end
     
     print("SUCCESS: Hands sprite sheet created!")
+    print("Dimensions: " .. sheetWidth .. "x" .. sheetHeight)
+    print("Frames: 3")
+    
+    -- Return the sprite
+    app.activeSprite = sheetSprite
+    return sheetSprite, nil
+end
+
+-- Generate collateral spritesheet from JSON file
+function SpriteSheetGenerator.generateCollateralSpriteSheet(collateral, jsonPath, assetsPath)
+    print("=== Collateral Sprite Sheet Generator ===")
+    print("Collateral: " .. collateral)
+    print("JSON Path: " .. jsonPath)
+    print("")
+    
+    -- Save original active sprite
+    local originalActiveSprite = app.activeSprite
+    
+    -- Validate JSON path exists
+    if not app.fs.isFile(jsonPath) then
+        local errMsg = "JSON file not found: " .. jsonPath
+        print("ERROR: " .. errMsg)
+        return nil, errMsg
+    end
+    
+    -- Parse JSON file
+    local collateralArray, err = parseCollateralJson(jsonPath)
+    if not collateralArray then
+        local errMsg = err or "Failed to parse JSON"
+        print("ERROR: " .. errMsg)
+        return nil, errMsg
+    end
+    
+    print("Loaded " .. #collateralArray .. " collateral views from JSON")
+    print("  Index 0: Front")
+    print("  Index 1: Left")
+    print("  Index 2: Right")
+    print("  Row 6 (back view) will be left blank")
+    print("")
+    
+    -- Create sprite: 576x384 (9 columns × 6 rows of 64x64 cells)
+    local sheetWidth = 576
+    local sheetHeight = 384
+    local frameWidth = 64
+    local frameHeight = 64
+    
+    print("Creating sprite: " .. sheetWidth .. "x" .. sheetHeight)
+    local sheetSprite = nil
+    local ok, err = pcall(function()
+        sheetSprite = Sprite(sheetWidth, sheetHeight, ColorMode.RGB)
+        app.activeSprite = sheetSprite
+    end)
+    
+    if not ok or not sheetSprite then
+        return nil, "Failed to create sprite: " .. (err or "Unknown error")
+    end
+    
+    -- Remove default layer
+    ok, err = pcall(function()
+        app.activeSprite = sheetSprite
+        if #sheetSprite.layers > 0 then
+            local defaultLayer = sheetSprite.layers[1]
+            sheetSprite:deleteLayer(defaultLayer)
+        end
+    end)
+    
+    -- Get frame 1 and create frame 2
+    local frame1 = sheetSprite.frames[1]
+    if not frame1 then
+        if originalActiveSprite then
+            app.activeSprite = originalActiveSprite
+        end
+        return nil, "Failed to create frame"
+    end
+    
+    local frame2 = sheetSprite:newFrame()
+    if not frame2 then
+        if originalActiveSprite then
+            app.activeSprite = originalActiveSprite
+        end
+        return nil, "Failed to create frame 2"
+    end
+    
+    -- Convert SVG strings to images
+    local frontImage, err = svgStringToImage(collateralArray[1], frameWidth, frameHeight)
+    if not frontImage then
+        return nil, "Failed to convert front collateral SVG: " .. (err or "Unknown error")
+    end
+    
+    local leftImage, err = svgStringToImage(collateralArray[2], frameWidth, frameHeight)
+    if not leftImage then
+        return nil, "Failed to convert left collateral SVG: " .. (err or "Unknown error")
+    end
+    
+    local rightImage, err = svgStringToImage(collateralArray[3], frameWidth, frameHeight)
+    if not rightImage then
+        return nil, "Failed to convert right collateral SVG: " .. (err or "Unknown error")
+    end
+    
+    -- Use front image for back view
+    local backImage = frontImage
+    
+    local layerCount = 0
+    
+    -- Row 1 (y=0): columns 1-5 (x=0, 64, 128, 192, 256) - front view
+    for col = 1, 5 do
+        local x = (col - 1) * 64  -- 0, 64, 128, 192, 256
+        local y = 0
+        local layerName = "Row 1 Col " .. col .. " - Front"
+        local layer = sheetSprite:newLayer(layerName)
+        
+        -- Frame 1
+        local layerImage1 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        -- Apply offset for column 2 (x=64)
+        local imageToDraw1 = (col == 2) and applyYOffsetToImage(frontImage, -1) or frontImage
+        layerImage1:drawImage(imageToDraw1, Point(x, y))
+        sheetSprite:newCel(layer, frame1, layerImage1)
+        
+        -- Frame 2: Column 1 duplicates column 2 (offset), column 2 stays offset, others stay base
+        local layerImage2 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        local imageToDraw2
+        if col == 1 then
+            -- Column 1 in frame 2: duplicate column 2 (offset)
+            imageToDraw2 = applyYOffsetToImage(frontImage, -1)
+        elseif col == 2 then
+            -- Column 2 in frame 2: same as frame 1 (offset)
+            imageToDraw2 = applyYOffsetToImage(frontImage, -1)
+        else
+            -- Other columns: same as frame 1 (base)
+            imageToDraw2 = frontImage
+        end
+        layerImage2:drawImage(imageToDraw2, Point(x, y))
+        sheetSprite:newCel(layer, frame2, layerImage2)
+        
+        layerCount = layerCount + 1
+    end
+    
+    -- Row 2 (y=64): columns 1-9 (x=0, 64, 128, 192, 256, 320, 384, 448, 512) - front view
+    for col = 1, 9 do
+        local x = (col - 1) * 64  -- 0, 64, 128, 192, 256, 320, 384, 448, 512
+        local y = 64
+        local layerName = "Row 2 Col " .. col .. " - Front"
+        local layer = sheetSprite:newLayer(layerName)
+        
+        -- Frame 1
+        local layerImage1 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        -- Apply offset for column 2 (x=64)
+        local imageToDraw1 = (col == 2) and applyYOffsetToImage(frontImage, -1) or frontImage
+        layerImage1:drawImage(imageToDraw1, Point(x, y))
+        sheetSprite:newCel(layer, frame1, layerImage1)
+        
+        -- Frame 2: Column 1 duplicates column 2 (offset), column 2 stays offset, others stay base
+        local layerImage2 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        local imageToDraw2
+        if col == 1 then
+            -- Column 1 in frame 2: duplicate column 2 (offset)
+            imageToDraw2 = applyYOffsetToImage(frontImage, -1)
+        elseif col == 2 then
+            -- Column 2 in frame 2: same as frame 1 (offset)
+            imageToDraw2 = applyYOffsetToImage(frontImage, -1)
+        else
+            -- Other columns: same as frame 1 (base)
+            imageToDraw2 = frontImage
+        end
+        layerImage2:drawImage(imageToDraw2, Point(x, y))
+        sheetSprite:newCel(layer, frame2, layerImage2)
+        
+        layerCount = layerCount + 1
+    end
+    
+    -- Row 3 (y=128): columns 1-2 (x=0, 64) and 6-9 (x=320, 384, 448, 512) - front view
+    for col = 1, 2 do
+        local x = (col - 1) * 64  -- 0, 64
+        local y = 128
+        local layerName = "Row 3 Col " .. col .. " - Front"
+        local layer = sheetSprite:newLayer(layerName)
+        
+        -- Frame 1
+        local layerImage1 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        -- Apply offset for column 2 (x=64)
+        local imageToDraw1 = (col == 2) and applyYOffsetToImage(frontImage, -1) or frontImage
+        layerImage1:drawImage(imageToDraw1, Point(x, y))
+        sheetSprite:newCel(layer, frame1, layerImage1)
+        
+        -- Frame 2: Column 1 duplicates column 2 (offset), column 2 stays offset
+        local layerImage2 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        local imageToDraw2
+        if col == 1 then
+            -- Column 1 in frame 2: duplicate column 2 (offset)
+            imageToDraw2 = applyYOffsetToImage(frontImage, -1)
+        elseif col == 2 then
+            -- Column 2 in frame 2: same as frame 1 (offset)
+            imageToDraw2 = applyYOffsetToImage(frontImage, -1)
+        else
+            -- Other columns: same as frame 1 (base)
+            imageToDraw2 = frontImage
+        end
+        layerImage2:drawImage(imageToDraw2, Point(x, y))
+        sheetSprite:newCel(layer, frame2, layerImage2)
+        
+        layerCount = layerCount + 1
+    end
+    for col = 6, 9 do
+        local x = (col - 1) * 64  -- 320, 384, 448, 512
+        local y = 128
+        local layerName = "Row 3 Col " .. col .. " - Front"
+        local layer = sheetSprite:newLayer(layerName)
+        
+        -- Frame 1
+        local layerImage1 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        layerImage1:drawImage(frontImage, Point(x, y))
+        sheetSprite:newCel(layer, frame1, layerImage1)
+        
+        -- Frame 2: same as frame 1
+        local layerImage2 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        layerImage2:drawImage(frontImage, Point(x, y))
+        sheetSprite:newCel(layer, frame2, layerImage2)
+        
+        layerCount = layerCount + 1
+    end
+    
+    -- Row 4 (y=192): columns 1-9 (x=0, 64, 128, 192, 256, 320, 384, 448, 512) - left view
+    for col = 1, 9 do
+        local x = (col - 1) * 64
+        local y = 192
+        local layerName = "Row 4 Col " .. col .. " - Left"
+        local layer = sheetSprite:newLayer(layerName)
+        
+        -- Frame 1
+        local layerImage1 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        -- Apply offset for column 2 (x=64)
+        local imageToDraw1 = (col == 2) and applyYOffsetToImage(leftImage, -1) or leftImage
+        layerImage1:drawImage(imageToDraw1, Point(x, y))
+        sheetSprite:newCel(layer, frame1, layerImage1)
+        
+        -- Frame 2: Column 1 duplicates column 2 (offset), column 2 stays offset, others stay base
+        local layerImage2 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        local imageToDraw2
+        if col == 1 then
+            -- Column 1 in frame 2: duplicate column 2 (offset)
+            imageToDraw2 = applyYOffsetToImage(leftImage, -1)
+        elseif col == 2 then
+            -- Column 2 in frame 2: same as frame 1 (offset)
+            imageToDraw2 = applyYOffsetToImage(leftImage, -1)
+        else
+            -- Other columns: same as frame 1 (base)
+            imageToDraw2 = leftImage
+        end
+        layerImage2:drawImage(imageToDraw2, Point(x, y))
+        sheetSprite:newCel(layer, frame2, layerImage2)
+        
+        layerCount = layerCount + 1
+    end
+    
+    -- Row 5 (y=256): columns 1-9 (x=0, 64, 128, 192, 256, 320, 384, 448, 512) - right view
+    for col = 1, 9 do
+        local x = (col - 1) * 64
+        local y = 256
+        local layerName = "Row 5 Col " .. col .. " - Right"
+        local layer = sheetSprite:newLayer(layerName)
+        
+        -- Frame 1
+        local layerImage1 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        -- Apply offset for column 2 (x=64)
+        local imageToDraw1 = (col == 2) and applyYOffsetToImage(rightImage, -1) or rightImage
+        layerImage1:drawImage(imageToDraw1, Point(x, y))
+        sheetSprite:newCel(layer, frame1, layerImage1)
+        
+        -- Frame 2: Column 1 duplicates column 2 (offset), column 2 stays offset, others stay base
+        local layerImage2 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+        local imageToDraw2
+        if col == 1 then
+            -- Column 1 in frame 2: duplicate column 2 (offset)
+            imageToDraw2 = applyYOffsetToImage(rightImage, -1)
+        elseif col == 2 then
+            -- Column 2 in frame 2: same as frame 1 (offset)
+            imageToDraw2 = applyYOffsetToImage(rightImage, -1)
+        else
+            -- Other columns: same as frame 1 (base)
+            imageToDraw2 = rightImage
+        end
+        layerImage2:drawImage(imageToDraw2, Point(x, y))
+        sheetSprite:newCel(layer, frame2, layerImage2)
+        
+        layerCount = layerCount + 1
+    end
+    
+    -- Row 6 (y=320): Left blank (back view does not show collateral)
+    
+    print("  Created " .. layerCount .. " collateral layers")
+    
+    print("SUCCESS: Collateral sprite sheet created!")
+    print("Dimensions: " .. sheetWidth .. "x" .. sheetHeight)
+    print("Frames: 2")
+    
+    -- Return the sprite
+    app.activeSprite = sheetSprite
+    return sheetSprite, nil
+end
+
+-- Generate mouth spritesheet from JSON file
+function SpriteSheetGenerator.generateMouthSpriteSheet(collateral, jsonPath, assetsPath)
+    print("=== Mouth Sprite Sheet Generator ===")
+    print("Collateral: " .. collateral)
+    print("JSON Path: " .. jsonPath)
+    print("")
+    
+    -- Save original active sprite
+    local originalActiveSprite = app.activeSprite
+    
+    -- Validate JSON path exists
+    if not app.fs.isFile(jsonPath) then
+        local errMsg = "JSON file not found: " .. jsonPath
+        print("ERROR: " .. errMsg)
+        return nil, errMsg
+    end
+    
+    -- Parse JSON file
+    local mouths, err = parseMouthJson(jsonPath)
+    if not mouths then
+        local errMsg = err or "Failed to parse JSON"
+        print("ERROR: " .. errMsg)
+        return nil, errMsg
+    end
+    
+    print("Loaded mouth SVGs from JSON")
+    print("  Happy: " .. (mouths.happy and "✓" or "✗"))
+    print("  Surprised: " .. (mouths.surprised and "✓" or "✗"))
+    print("  Sad: " .. (mouths.sad and "✓" or "✗"))
+    print("")
+    
+    -- Create sprite: 576x192 (9 columns × 3 rows of 64x64 cells)
+    local sheetWidth = 576
+    local sheetHeight = 192
+    local frameWidth = 64
+    local frameHeight = 64
+    
+    print("Creating sprite: " .. sheetWidth .. "x" .. sheetHeight)
+    local sheetSprite = nil
+    local ok, err = pcall(function()
+        sheetSprite = Sprite(sheetWidth, sheetHeight, ColorMode.RGB)
+        app.activeSprite = sheetSprite
+    end)
+    
+    if not ok or not sheetSprite then
+        return nil, "Failed to create sprite: " .. (err or "Unknown error")
+    end
+    
+    -- Create 3 frames
+    local frame1 = sheetSprite.frames[1]
+    local frame2 = sheetSprite:newFrame()
+    local frame3 = sheetSprite:newFrame()
+    
+    -- Remove default layer
+    ok, err = pcall(function()
+        app.activeSprite = sheetSprite
+        if #sheetSprite.layers > 0 then
+            local defaultLayer = sheetSprite.layers[1]
+            sheetSprite:deleteLayer(defaultLayer)
+        end
+    end)
+    
+    -- Convert SVG strings to images
+    local happyImage, err = svgStringToImage(mouths.happy, frameWidth, frameHeight)
+    if not happyImage then
+        return nil, "Failed to convert happy mouth SVG: " .. (err or "Unknown error")
+    end
+    
+    local surprisedImage, err = svgStringToImage(mouths.surprised, frameWidth, frameHeight)
+    if not surprisedImage then
+        return nil, "Failed to convert surprised mouth SVG: " .. (err or "Unknown error")
+    end
+    
+    local sadImage, err = svgStringToImage(mouths.sad, frameWidth, frameHeight)
+    if not sadImage then
+        return nil, "Failed to convert sad mouth SVG: " .. (err or "Unknown error")
+    end
+    
+    -- Create offset version of happy mouth
+    local happyOffset = applyYOffsetToImage(happyImage, -1)
+    
+    -- Create frame images for all 3 frames
+    local frameImages = {}
+    for i = 1, 3 do
+        frameImages[i] = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+    end
+    
+    -- Row 1 (y=0)
+    -- Columns 1, 3-5: happy mouth
+    -- Column 2: happy mouth with offset
+    -- Column 1, Frame 2: happy mouth with offset
+    local row1Y = 0
+    
+    -- Column 1
+    frameImages[1]:drawImage(happyImage, Point(0, row1Y))  -- Frame 1: base
+    frameImages[2]:drawImage(happyOffset, Point(0, row1Y))  -- Frame 2: offset
+    frameImages[3]:drawImage(happyImage, Point(0, row1Y))  -- Frame 3: base
+    
+    -- Column 2
+    frameImages[1]:drawImage(happyOffset, Point(64, row1Y))  -- Frame 1: offset
+    frameImages[2]:drawImage(happyOffset, Point(64, row1Y))  -- Frame 2: offset
+    frameImages[3]:drawImage(happyOffset, Point(64, row1Y))  -- Frame 3: offset
+    
+    -- Columns 3-5
+    for col = 3, 5 do
+        local x = (col - 1) * 64  -- 128, 192, 256
+        frameImages[1]:drawImage(happyImage, Point(x, row1Y))
+        frameImages[2]:drawImage(happyImage, Point(x, row1Y))
+        frameImages[3]:drawImage(happyImage, Point(x, row1Y))
+    end
+    
+    -- Row 2 (y=64)
+    -- Columns 1-5: happy mouth
+    -- Column 1, Frame 2: happy mouth with offset
+    -- Column 6: surprised mouth
+    -- Column 7: sad mouth
+    -- Column 8: surprised mouth
+    -- Column 9: Animation (Frame 1: column 6, Frame 2: column 7, Frame 3: column 8)
+    local row2Y = 64
+    
+    -- Column 1: happy mouth (offset in frame 2)
+    frameImages[1]:drawImage(happyImage, Point(0, row2Y))  -- Frame 1: base
+    frameImages[2]:drawImage(happyOffset, Point(0, row2Y))  -- Frame 2: offset
+    frameImages[3]:drawImage(happyImage, Point(0, row2Y))  -- Frame 3: base
+    
+    -- Columns 2-5: happy mouth
+    for col = 2, 5 do
+        local x = (col - 1) * 64  -- 64, 128, 192, 256
+        frameImages[1]:drawImage(happyImage, Point(x, row2Y))
+        frameImages[2]:drawImage(happyImage, Point(x, row2Y))
+        frameImages[3]:drawImage(happyImage, Point(x, row2Y))
+    end
+    
+    -- Column 6: surprised mouth (static in all frames)
+    frameImages[1]:drawImage(surprisedImage, Point(320, row2Y))
+    frameImages[2]:drawImage(surprisedImage, Point(320, row2Y))
+    frameImages[3]:drawImage(surprisedImage, Point(320, row2Y))
+    
+    -- Column 7: sad mouth (static in all frames)
+    frameImages[1]:drawImage(sadImage, Point(384, row2Y))
+    frameImages[2]:drawImage(sadImage, Point(384, row2Y))
+    frameImages[3]:drawImage(sadImage, Point(384, row2Y))
+    
+    -- Column 8: surprised mouth (static in all frames)
+    frameImages[1]:drawImage(surprisedImage, Point(448, row2Y))
+    frameImages[2]:drawImage(surprisedImage, Point(448, row2Y))
+    frameImages[3]:drawImage(surprisedImage, Point(448, row2Y))
+    
+    -- Column 9: Animation
+    frameImages[1]:drawImage(surprisedImage, Point(512, row2Y))  -- Frame 1: surprised (same as col 6)
+    frameImages[2]:drawImage(sadImage, Point(512, row2Y))        -- Frame 2: sad (same as col 7)
+    frameImages[3]:drawImage(surprisedImage, Point(512, row2Y))  -- Frame 3: surprised (same as col 8)
+    
+    -- Row 3 (y=128)
+    -- Columns 1-2: happy mouth
+    -- Column 1, Frame 2: happy mouth with offset
+    -- Column 6: surprised mouth
+    -- Column 7: sad mouth
+    -- Column 8: surprised mouth
+    -- Column 9: Animation (Frame 1: column 6, Frame 2: column 7, Frame 3: column 8)
+    local row3Y = 128
+    
+    -- Column 1: happy mouth (offset in frame 2)
+    frameImages[1]:drawImage(happyImage, Point(0, row3Y))  -- Frame 1: base
+    frameImages[2]:drawImage(happyOffset, Point(0, row3Y))  -- Frame 2: offset
+    frameImages[3]:drawImage(happyImage, Point(0, row3Y))  -- Frame 3: base
+    
+    -- Column 2: happy mouth
+    frameImages[1]:drawImage(happyImage, Point(64, row3Y))
+    frameImages[2]:drawImage(happyImage, Point(64, row3Y))
+    frameImages[3]:drawImage(happyImage, Point(64, row3Y))
+    
+    -- Column 6: surprised mouth (static in all frames)
+    frameImages[1]:drawImage(surprisedImage, Point(320, row3Y))
+    frameImages[2]:drawImage(surprisedImage, Point(320, row3Y))
+    frameImages[3]:drawImage(surprisedImage, Point(320, row3Y))
+    
+    -- Column 7: sad mouth (static in all frames)
+    frameImages[1]:drawImage(sadImage, Point(384, row3Y))
+    frameImages[2]:drawImage(sadImage, Point(384, row3Y))
+    frameImages[3]:drawImage(sadImage, Point(384, row3Y))
+    
+    -- Column 8: surprised mouth (static in all frames)
+    frameImages[1]:drawImage(surprisedImage, Point(448, row3Y))
+    frameImages[2]:drawImage(surprisedImage, Point(448, row3Y))
+    frameImages[3]:drawImage(surprisedImage, Point(448, row3Y))
+    
+    -- Column 9: Animation
+    frameImages[1]:drawImage(surprisedImage, Point(512, row3Y))  -- Frame 1: surprised (same as col 6)
+    frameImages[2]:drawImage(sadImage, Point(512, row3Y))        -- Frame 2: sad (same as col 7)
+    frameImages[3]:drawImage(surprisedImage, Point(512, row3Y))  -- Frame 3: surprised (same as col 8)
+    
+    -- Create single layer and add cels for all frames
+    local mouthLayer = sheetSprite:newLayer("Mouth")
+    sheetSprite:newCel(mouthLayer, frame1, frameImages[1])
+    sheetSprite:newCel(mouthLayer, frame2, frameImages[2])
+    sheetSprite:newCel(mouthLayer, frame3, frameImages[3])
+    
+    print("  Created mouth layer with 3 frames")
+    print("SUCCESS: Mouth sprite sheet created!")
     print("Dimensions: " .. sheetWidth .. "x" .. sheetHeight)
     print("Frames: 3")
     
