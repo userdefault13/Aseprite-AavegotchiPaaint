@@ -581,6 +581,24 @@ local function applyYOffsetToImage(image, yOffset)
     return newImage
 end
 
+-- Flip image horizontally
+local function flipImageHorizontally(image)
+    if not image then
+        return image
+    end
+    
+    local newImage = Image(image.width, image.height, ColorMode.RGB)
+    -- Copy pixels from right to left
+    for y = 0, image.height - 1 do
+        for x = 0, image.width - 1 do
+            local sourceX = image.width - 1 - x
+            local pixel = image:getPixel(sourceX, y)
+            newImage:putPixel(x, y, pixel)
+        end
+    end
+    return newImage
+end
+
 -- Parse JSON file to extract body array
 local function parseBodyJson(jsonPath)
     local file = io.open(jsonPath, "r")
@@ -1087,6 +1105,165 @@ local function parseCollateralJson(jsonPath)
     end
     
     return collateralArray, nil
+end
+
+-- Get hex color for eye color rarity from aavegotchi_db_rarity.json
+local function getRarityHexColor(rarityString, assetsPath)
+    local rarityJsonPath = assetsPath .. "/JSONs/aavegotchi_db_rarity.json"
+    if not app.fs.isFile(rarityJsonPath) then
+        return nil, "Rarity JSON file not found: " .. rarityJsonPath
+    end
+    
+    local file = io.open(rarityJsonPath, "r")
+    if not file then
+        return nil, "Failed to open rarity JSON file"
+    end
+    
+    local jsonContent = file:read("*all")
+    file:close()
+    
+    if not jsonContent or jsonContent == "" then
+        return nil, "Rarity JSON file is empty"
+    end
+    
+    -- Map rarity string to range key
+    local rangeKey = nil
+    if rarityString == "mythicallow" then
+        rangeKey = "0-1"
+    elseif rarityString == "rarelow" then
+        rangeKey = "2-9"
+    elseif rarityString == "uncommonlow" then
+        rangeKey = "10-24"
+    elseif rarityString == "common" then
+        -- Common uses collateral color, return nil to indicate no replacement needed
+        return nil, nil
+    elseif rarityString == "uncommonhigh" then
+        rangeKey = "75-90"
+    elseif rarityString == "rarehigh" then
+        rangeKey = "91-97"
+    elseif rarityString == "mythicalhigh" then
+        rangeKey = "98-99"
+    end
+    
+    if not rangeKey then
+        return nil, "Unknown rarity: " .. rarityString
+    end
+    
+    -- Parse JSON to extract hex value for this range
+    -- Look for "rangeKey": { ... "hex": "value" or "hex": null }
+    -- Escape special characters in rangeKey for pattern matching
+    local escapedRangeKey = rangeKey:gsub('%-', '%%-')  -- Escape dash for pattern
+    local pattern = '"' .. escapedRangeKey .. '"%s*:%s*%{[^}]*"hex"%s*:%s*"([^"]+)"'
+    local hexMatch = jsonContent:match(pattern)
+    
+    if not hexMatch then
+        -- Try a more flexible pattern that handles newlines and whitespace
+        pattern = '"' .. escapedRangeKey .. '"' .. '[^}]*"hex"%s*:%s*"([^"]+)"'
+        hexMatch = jsonContent:match(pattern)
+    end
+    
+    if not hexMatch then
+        -- Try to find if it's null
+        local nullPattern = '"' .. escapedRangeKey .. '"' .. '[^}]*"hex"%s*:%s*(null)'
+        local nullMatch = jsonContent:match(nullPattern)
+        if nullMatch == "null" then
+            return nil, nil  -- Common rarity, use collateral color
+        end
+        return nil, "Could not find hex for rarity: " .. rarityString .. " (range: " .. rangeKey .. ")"
+    end
+    
+    -- hexMatch should now be the hex value (e.g., "#ff00ff")
+    hexMatch = hexMatch:gsub('%s+', '')
+    
+    return hexMatch, nil
+end
+
+-- Apply eye color to SVG string by replacing gotchi-eyeColor fill
+local function applyEyeColorToSvg(svgString, hexColor)
+    if not hexColor then
+        return svgString  -- No color to apply (common rarity uses collateral color)
+    end
+    
+    -- Replace .gotchi-eyeColor{fill:#...} with the new color
+    -- Pattern matches: .gotchi-eyeColor{fill:#hexcolor;} or .gotchi-eyeColor{fill:#hexcolor}
+    -- Match any hex color after fill: and before ; or }
+    local pattern = '(%.gotchi%-eyeColor%s*{[^}]*fill%s*:)[^;}]+([;}])'
+    
+    local modifiedSvg = svgString:gsub(pattern, '%1' .. hexColor .. '%2')
+    
+    return modifiedSvg
+end
+
+-- Parse JSON file to extract eyes array
+local function parseEyesJson(jsonPath)
+    local file = io.open(jsonPath, "r")
+    if not file then
+        return nil, "Failed to open JSON file: " .. jsonPath
+    end
+    
+    local jsonContent = file:read("*all")
+    file:close()
+    
+    if not jsonContent or jsonContent == "" then
+        return nil, "JSON file is empty"
+    end
+    
+    -- Simple parser to extract eyes array
+    local eyesArray = {}
+    local eyesStart = jsonContent:find('"eyes"%s*:%s*%[')
+    if not eyesStart then
+        return nil, "Could not find 'eyes' array in JSON"
+    end
+    
+    local arrayStart = jsonContent:find('%[', eyesStart)
+    local inString = false
+    local escapeNext = false
+    local currentString = ""
+    
+    for i = arrayStart + 1, #jsonContent do
+        local char = jsonContent:sub(i, i)
+        
+        if escapeNext then
+            if inString then
+                -- Handle escape sequences
+                if char == '"' then
+                    currentString = currentString .. '"'
+                elseif char == '\\' then
+                    currentString = currentString .. '\\'
+                elseif char == 'n' then
+                    currentString = currentString .. '\n'
+                elseif char == 't' then
+                    currentString = currentString .. '\t'
+                else
+                    currentString = currentString .. '\\' .. char
+                end
+                escapeNext = false
+            end
+        elseif char == '\\' and inString then
+            escapeNext = true
+        elseif char == '"' then
+            if inString then
+                -- End of string
+                table.insert(eyesArray, currentString)
+                currentString = ""
+                inString = false
+            else
+                -- Start of string
+                inString = true
+                currentString = ""
+            end
+        elseif inString then
+            currentString = currentString .. char
+        elseif char == ']' and not inString then
+            break
+        end
+    end
+    
+    if #eyesArray < 3 then
+        return nil, "Expected at least 3 eye views (front, left, right), found " .. #eyesArray
+    end
+    
+    return eyesArray, nil
 end
 
 -- Parse JSON file to extract mouth arrays
@@ -2574,6 +2751,269 @@ function SpriteSheetGenerator.generateMouthSpriteSheet(collateral, jsonPath, ass
     print("SUCCESS: Mouth sprite sheet created!")
     print("Dimensions: " .. sheetWidth .. "x" .. sheetHeight)
     print("Frames: 3")
+    
+    -- Return the sprite
+    app.activeSprite = sheetSprite
+    return sheetSprite, nil
+end
+
+-- Generate eyes spritesheet from JSON file
+function SpriteSheetGenerator.generateEyesSpriteSheet(rarity, jsonPath, assetsPath)
+    print("=== Eyes Sprite Sheet Generator ===")
+    print("Rarity: " .. rarity)
+    print("JSON Path: " .. jsonPath)
+    print("")
+    
+    -- Save original active sprite
+    local originalActiveSprite = app.activeSprite
+    
+    -- Validate JSON path exists
+    if not app.fs.isFile(jsonPath) then
+        local errMsg = "JSON file not found: " .. jsonPath
+        print("ERROR: " .. errMsg)
+        return nil, errMsg
+    end
+    
+    -- Parse JSON file
+    local eyesArray, err = parseEyesJson(jsonPath)
+    if not eyesArray then
+        local errMsg = err or "Failed to parse JSON"
+        print("ERROR: " .. errMsg)
+        return nil, errMsg
+    end
+    
+    print("Loaded " .. #eyesArray .. " eye views from JSON")
+    print("  Index 0: Front")
+    print("  Index 1: Left")
+    print("  Index 2: Right")
+    print("")
+    
+    -- Get rarity hex color and apply to SVGs
+    print("Getting rarity hex color for: " .. rarity)
+    local rarityHex, err = getRarityHexColor(rarity, assetsPath)
+    if err then
+        print("WARNING: Could not get rarity color: " .. err)
+        print("  Using colors from JSON file (collateral color for common rarity)")
+    else
+        if rarityHex then
+            print("Applying rarity color to eyes: " .. rarityHex)
+            -- Apply color to all eye SVGs
+            for i = 1, #eyesArray do
+                eyesArray[i] = applyEyeColorToSvg(eyesArray[i], rarityHex)
+            end
+        else
+            print("Using collateral color (common rarity or no hex specified)")
+        end
+    end
+    print("")
+    
+    -- Create sprite: 576x384 (9 columns × 6 rows of 64x64 cells)
+    local sheetWidth = 576
+    local sheetHeight = 384
+    local frameWidth = 64
+    local frameHeight = 64
+    
+    print("Creating sprite: " .. sheetWidth .. "x" .. sheetHeight)
+    local sheetSprite = nil
+    local ok, err = pcall(function()
+        sheetSprite = Sprite(sheetWidth, sheetHeight, ColorMode.RGB)
+        app.activeSprite = sheetSprite
+    end)
+    
+    if not ok or not sheetSprite then
+        return nil, "Failed to create sprite: " .. (err or "Unknown error")
+    end
+    
+    -- Remove default layer
+    ok, err = pcall(function()
+        app.activeSprite = sheetSprite
+        if #sheetSprite.layers > 0 then
+            local defaultLayer = sheetSprite.layers[1]
+            sheetSprite:deleteLayer(defaultLayer)
+        end
+    end)
+    
+    -- Get frame 1 and create frame 2
+    local frame1 = sheetSprite.frames[1]
+    if not frame1 then
+        if originalActiveSprite then
+            app.activeSprite = originalActiveSprite
+        end
+        return nil, "Failed to create frame"
+    end
+    
+    local frame2 = sheetSprite:newFrame()
+    if not frame2 then
+        if originalActiveSprite then
+            app.activeSprite = originalActiveSprite
+        end
+        return nil, "Failed to create frame 2"
+    end
+    
+    -- Convert SVG strings to images
+    local frontImage, err = svgStringToImage(eyesArray[1], frameWidth, frameHeight)
+    if not frontImage then
+        return nil, "Failed to convert front eye SVG: " .. (err or "Unknown error")
+    end
+    
+    local leftImage, err = svgStringToImage(eyesArray[2], frameWidth, frameHeight)
+    if not leftImage then
+        return nil, "Failed to convert left eye SVG: " .. (err or "Unknown error")
+    end
+    
+    local rightImage, err = svgStringToImage(eyesArray[3], frameWidth, frameHeight)
+    if not rightImage then
+        return nil, "Failed to convert right eye SVG: " .. (err or "Unknown error")
+    end
+    
+    -- Create offset versions
+    local frontOffset = applyYOffsetToImage(frontImage, -1)
+    local leftOffset = applyYOffsetToImage(leftImage, -1)
+    local rightOffset = applyYOffsetToImage(rightImage, -1)
+    
+    local layerCount = 0
+    
+    -- Row 1 (y=0): columns 1, 3-5 use front view; column 2 apply offset
+    -- Row 1, column 1, frame 2: add offset
+    for col = 1, 5 do
+        if col == 1 or col == 2 or (col >= 3 and col <= 5) then
+            local x = (col - 1) * 64  -- 0, 64, 128, 192, 256
+            local y = 0
+            local layerName = "Row 1 Col " .. col .. " - Front"
+            local layer = sheetSprite:newLayer(layerName)
+            
+            -- Frame 1
+            local layerImage1 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+            local imageToDraw1
+            if col == 2 then
+                imageToDraw1 = frontOffset  -- Column 2: offset
+            else
+                imageToDraw1 = frontImage   -- Columns 1, 3-5: base
+            end
+            layerImage1:drawImage(imageToDraw1, Point(x, y))
+            sheetSprite:newCel(layer, frame1, layerImage1)
+            
+            -- Frame 2
+            local layerImage2 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+            local imageToDraw2
+            if col == 1 then
+                imageToDraw2 = frontOffset  -- Column 1, frame 2: offset
+            elseif col == 2 then
+                imageToDraw2 = frontOffset  -- Column 2, frame 2: offset (same as frame 1)
+            else
+                imageToDraw2 = frontImage   -- Columns 3-5, frame 2: base (same as frame 1)
+            end
+            layerImage2:drawImage(imageToDraw2, Point(x, y))
+            sheetSprite:newCel(layer, frame2, layerImage2)
+            
+            layerCount = layerCount + 1
+        end
+    end
+    
+    -- Row 2 (y=64): columns 1, 3-5 use front view; column 2 apply offset
+    -- Row 2, column 1, frame 2: add offset
+    for col = 1, 5 do
+        if col == 1 or col == 2 or (col >= 3 and col <= 5) then
+            local x = (col - 1) * 64  -- 0, 64, 128, 192, 256
+            local y = 64
+            local layerName = "Row 2 Col " .. col .. " - Front"
+            local layer = sheetSprite:newLayer(layerName)
+            
+            -- Frame 1
+            local layerImage1 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+            local imageToDraw1
+            if col == 2 then
+                imageToDraw1 = frontOffset  -- Column 2: offset
+            else
+                imageToDraw1 = frontImage   -- Columns 1, 3-5: base
+            end
+            layerImage1:drawImage(imageToDraw1, Point(x, y))
+            sheetSprite:newCel(layer, frame1, layerImage1)
+            
+            -- Frame 2
+            local layerImage2 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+            local imageToDraw2
+            if col == 1 then
+                imageToDraw2 = frontOffset  -- Column 1, frame 2: offset
+            elseif col == 2 then
+                imageToDraw2 = frontOffset  -- Column 2, frame 2: offset (same as frame 1)
+            else
+                imageToDraw2 = frontImage   -- Columns 3-5, frame 2: base (same as frame 1)
+            end
+            layerImage2:drawImage(imageToDraw2, Point(x, y))
+            sheetSprite:newCel(layer, frame2, layerImage2)
+            
+            layerCount = layerCount + 1
+        end
+    end
+    
+    -- Row 3 (y=128): Left blank
+    
+    -- Row 4 (y=192): columns 1 and 3-5 use left view
+    -- Row 4, column 1, frame 2: add offset
+    for col = 1, 5 do
+        if col == 1 or (col >= 3 and col <= 5) then
+            local x = (col - 1) * 64  -- 0, 128, 192, 256
+            local y = 192
+            local layerName = "Row 4 Col " .. col .. " - Left"
+            local layer = sheetSprite:newLayer(layerName)
+            
+            -- Frame 1
+            local layerImage1 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+            layerImage1:drawImage(leftImage, Point(x, y))  -- All columns: base
+            sheetSprite:newCel(layer, frame1, layerImage1)
+            
+            -- Frame 2
+            local layerImage2 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+            local imageToDraw2
+            if col == 1 then
+                imageToDraw2 = leftOffset   -- Column 1, frame 2: offset
+            else
+                imageToDraw2 = leftImage    -- Columns 3-5, frame 2: base
+            end
+            layerImage2:drawImage(imageToDraw2, Point(x, y))
+            sheetSprite:newCel(layer, frame2, layerImage2)
+            
+            layerCount = layerCount + 1
+        end
+    end
+    
+    -- Row 5 (y=256): columns 1 and 3-5 use right view
+    -- Row 5, column 1, frame 2: add offset
+    for col = 1, 5 do
+        if col == 1 or (col >= 3 and col <= 5) then
+            local x = (col - 1) * 64  -- 0, 128, 192, 256
+            local y = 256
+            local layerName = "Row 5 Col " .. col .. " - Right"
+            local layer = sheetSprite:newLayer(layerName)
+            
+            -- Frame 1
+            local layerImage1 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+            layerImage1:drawImage(rightImage, Point(x, y))  -- All columns: base
+            sheetSprite:newCel(layer, frame1, layerImage1)
+            
+            -- Frame 2
+            local layerImage2 = Image(sheetWidth, sheetHeight, ColorMode.RGB)
+            local imageToDraw2
+            if col == 1 then
+                imageToDraw2 = rightOffset  -- Column 1, frame 2: offset
+            else
+                imageToDraw2 = rightImage   -- Columns 3-5, frame 2: base
+            end
+            layerImage2:drawImage(imageToDraw2, Point(x, y))
+            sheetSprite:newCel(layer, frame2, layerImage2)
+            
+            layerCount = layerCount + 1
+        end
+    end
+    
+    -- Row 6 (y=320): Left blank
+    
+    print("  Created " .. layerCount .. " eye layers")
+    
+    print("SUCCESS: Eyes sprite sheet created!")
+    print("Dimensions: " .. sheetWidth .. "x" .. sheetHeight)
+    print("Frames: 2")
     
     -- Return the sprite
     app.activeSprite = sheetSprite

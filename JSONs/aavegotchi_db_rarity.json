@@ -1,0 +1,51 @@
+{
+    "0-1": {
+        "rarity": "Mythical",
+        "side": "low",
+        "probability": "2%",
+        "eye_color": "Pink",
+        "hex": "#ff00ff"
+    },
+    "2-9": {
+        "rarity": "Rare",
+        "side": "low",
+        "probability": "8%",
+        "eye_color": "Blue",
+        "hex": "#0363ff"
+    },
+    "10-24": {
+        "rarity": "Uncommon",
+        "side": "low",
+        "probability": "15%",
+        "eye_color": "Purple",
+        "hex": "#5d25bf"
+    },
+    "25-74": {
+        "rarity": "Common",
+        "side": null,
+        "probability": "50%",
+        "eye_color": "Collateral",
+        "hex": null
+    },
+    "75-90": {
+        "rarity": "Uncommon",
+        "side": "high",
+        "probability": "15%",
+        "eye_color": "Teal",
+        "hex": "#37828d"
+    },
+    "91-97": {
+        "rarity": "Rare",
+        "side": "high",
+        "probability": "8%",
+        "eye_color": "Orange",
+        "hex": "#ea8d27"
+    },
+    "98-99": {
+        "rarity": "Mythical",
+        "side": "high",
+        "probability": "2%",
+        "eye_color": "Lime Green",
+        "hex": "#4fffa9"
+    }
+}
